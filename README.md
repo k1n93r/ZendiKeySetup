@@ -4,12 +4,9 @@
 
 ## Tải và sử dụng
 
-1. Mở trang [Releases](../../releases/latest), tải `ZendiKeySetup.zip` trong phần **Assets**.
-2. Giải nén ZIP rồi chạy `ZendiKeySetup.exe`.
-3. Dán ZendiKey API key vào ô **API key**.
-4. Chọn **Claude**, **Codex / ChatGPT**, hoặc chọn cả hai.
-5. Giữ tùy chọn tự cài ứng dụng còn thiếu nếu muốn, rồi bấm **Set up selected**.
-6. Chờ thông báo hoàn tất và khởi động lại Claude Desktop/ChatGPT nếu ứng dụng yêu cầu.
+1. [Tải `ZendiKeySetup.exe`](../../releases/latest) trong phần **Assets**.
+2. Mở file vừa tải, nhập API key, chọn ứng dụng cần dùng rồi bấm **Set up selected**.
+3. Khởi động lại Claude Desktop/ChatGPT sau khi hoàn tất.
 
 **Set up selected** sẽ kiểm tra key, tìm model tương thích, cài các client còn thiếu đã được chọn và ghi cấu hình. Nút **Install selected** chỉ cài các client đang chọn mà không thay đổi cấu hình gateway.
 
@@ -20,7 +17,7 @@ ChatGPT thông thường vẫn dùng tài khoản OpenAI đang đăng nhập. Ga
 Bản phát hành hiện chưa ký chứng thư số nên Windows có thể hiện cảnh báo ở lần chạy đầu. Nếu file được tải từ đúng trang Releases của dự án, chọn **More info** rồi **Run anyway**. Mã SHA-256 của từng bản được ghi trong release notes và có thể kiểm tra bằng:
 
 ```powershell
-Get-FileHash .\ZendiKeySetup.zip -Algorithm SHA256
+Get-FileHash .\ZendiKeySetup.exe -Algorithm SHA256
 ```
 
 ## Ứng dụng được cấu hình
