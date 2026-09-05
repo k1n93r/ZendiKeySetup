@@ -2,6 +2,8 @@
 
 Cài đặt ZendiKey cho Claude hoặc Codex/ChatGPT trên Windows.
 
+![Giao diện ZendiKey Setup](assets/zendikey-setup.png)
+
 ## Cách sử dụng
 
 1. [Tải ZendiKeySetup.exe](https://github.com/k1n93r/ZendiKeySetup/releases/latest/download/ZendiKeySetup.exe).
