@@ -1,0 +1,20 @@
+dist/
+bin/
+obj/
+.vs/
+
+# Generated from assets/crane-source.jpg during the build.
+assets/crane.ico
+assets/crane.png
+
+# Local shortcuts and machine-specific files.
+latest
+*.user
+*.suo
+
+# Never publish local credentials or backups.
+.env
+.env.*
+credential.dat
+backups/
+*.key
