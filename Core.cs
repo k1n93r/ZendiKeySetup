@@ -2102,10 +2102,12 @@ namespace ZendiKeySetup
     {
         internal static CommandResult RunPowerShell(string script, int timeoutMilliseconds)
         {
-            string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+            // Plain -Command instead of -EncodedCommand: base64-encoded PowerShell is a
+            // common malware pattern and trips antivirus heuristics (Avast CyberCapture).
+            string command = script.Replace("\"", "\\\"");
             return Run(
                 "powershell.exe",
-                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded,
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"" + command + "\"",
                 timeoutMilliseconds);
         }
 
