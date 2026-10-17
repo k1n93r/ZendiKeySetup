@@ -618,9 +618,13 @@ namespace ZendiKeySetup
     {
         private static readonly string[] ClaudePreferences =
         {
+            "claude-opus-5.5",
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5",
+            "claude-opus-4.8",
+            "claude-opus-4.7",
+            "claude-haiku-4.5",
             "claude-sonnet-4.5",
             "claude-sonnet-4-5",
             "claude-opus-4.1",
@@ -629,9 +633,15 @@ namespace ZendiKeySetup
 
         private static readonly string[] CodexPreferences =
         {
+            "gpt-6.1-sol",
+            "gpt-6-sol",
             "gpt-5.6-sol",
-            "gpt-5.4",
+            "gpt-6-luna",
+            "gpt-5.6-luna",
+            "gpt-6-astra",
+            "gpt-5.6-terra",
             "gpt-5.5",
+            "gpt-5.4",
             "gpt-5.4-mini",
             "claude-opus-5",
             "claude-sonnet-5"

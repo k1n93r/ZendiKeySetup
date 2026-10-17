@@ -22,7 +22,9 @@ if (-not (Test-Path -LiteralPath $IconSource -PathType Leaf)) {
 
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
-Copy-Item -LiteralPath $IconSource -Destination $sourceCopy -Force
+if ((Resolve-Path -LiteralPath $IconSource).Path -ne (Resolve-Path -LiteralPath $sourceCopy -ErrorAction SilentlyContinue).Path) {
+    Copy-Item -LiteralPath $IconSource -Destination $sourceCopy -Force
+}
 
 $assetBuilder = @'
 using System;
