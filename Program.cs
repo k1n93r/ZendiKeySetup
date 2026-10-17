@@ -45,14 +45,19 @@ namespace ZendiKeySetup
                     return CommandLineStatus();
                 }
 
+                bool codexOnly = HasArgument(args, "--codex-only");
+                bool claudeOnly = HasArgument(args, "--claude-only");
+                bool configureClaude = !codexOnly;
+                bool configureCodex = !claudeOnly;
+
                 if (HasArgument(args, "--apply-existing"))
                 {
-                    return ApplyExisting().GetAwaiter().GetResult();
+                    return ApplyExisting(configureClaude, configureCodex).GetAwaiter().GetResult();
                 }
 
                 if (HasArgument(args, "--apply-stdin"))
                 {
-                    return ApplyFromStdin().GetAwaiter().GetResult();
+                    return ApplyFromStdin(configureClaude, configureCodex).GetAwaiter().GetResult();
                 }
 
                 if (HasArgument(args, "--install-missing"))
@@ -162,7 +167,7 @@ namespace ZendiKeySetup
             return 0;
         }
 
-        private static async Task<int> ApplyExisting()
+        private static async Task<int> ApplyExisting(bool configureClaude, bool configureCodex)
         {
             string key = ConfigManager.FindExistingKey();
             if (string.IsNullOrWhiteSpace(key))
@@ -171,22 +176,22 @@ namespace ZendiKeySetup
                 return 2;
             }
 
-            return await ApplyKey(key);
+            return await ApplyKey(key, configureClaude, configureCodex);
         }
 
-        private static async Task<int> ApplyFromStdin()
+        private static async Task<int> ApplyFromStdin(bool configureClaude, bool configureCodex)
         {
             string key = Console.In.ReadLine();
             if (string.IsNullOrWhiteSpace(key))
             {
-                Stdout.WriteLine("ERROR: No API key was provided on stdin.");
+                Stdout.WriteLine("ERROR: No API key or ZEN code was provided on stdin.");
                 return 2;
             }
 
-            return await ApplyKey(key);
+            return await ApplyKey(key, configureClaude, configureCodex);
         }
 
-        private static async Task<int> ApplyKey(string key)
+        private static async Task<int> ApplyKey(string key, bool configureClaude, bool configureCodex)
         {
             if (KeyCodeClient.IsZenCode(key))
             {
@@ -204,14 +209,16 @@ namespace ZendiKeySetup
                 return 3;
             }
 
-            string claudeModel = ModelSelector.PickClaude(check.Models);
-            string codexModel = ModelSelector.PickCodex(check.Models);
+            string claudeModel = configureClaude ? ModelSelector.PickClaude(check.Models) : null;
+            string codexModel = configureCodex ? ModelSelector.PickCodex(check.Models) : null;
 
             check = await GatewayClient.FindCompatibleModelsAsync(
                 key,
                 check.Models,
                 claudeModel,
-                codexModel);
+                codexModel,
+                configureClaude,
+                configureCodex);
             if (!check.AllOk)
             {
                 Stdout.WriteLine("ERROR: " + check.Summary);
@@ -220,15 +227,36 @@ namespace ZendiKeySetup
 
             claudeModel = check.ClaudeModel;
             codexModel = check.CodexModel;
-            Stdout.WriteLine("Claude model: " + claudeModel);
-            Stdout.WriteLine("Codex model: " + codexModel);
+            if (configureClaude)
+            {
+                Stdout.WriteLine("Claude model: " + claudeModel);
+            }
+            if (configureCodex)
+            {
+                Stdout.WriteLine("Codex model: " + codexModel);
+            }
 
-            ApplyResult result = ConfigManager.Apply(key, claudeModel, codexModel, check.Models);
+            ApplyResult result = ConfigManager.Apply(key, claudeModel, codexModel, check.Models, configureClaude, configureCodex);
             Stdout.WriteLine("Backup: " + result.BackupDirectory);
-            Stdout.WriteLine("Claude Code: configured");
-            Stdout.WriteLine("Codex CLI / ChatGPT Desktop: configured");
-            Stdout.WriteLine("Claude Desktop: " + result.ClaudeDesktopMessage);
+            if (configureClaude)
+            {
+                Stdout.WriteLine("Claude Code: configured");
+                Stdout.WriteLine("Claude Desktop: " + result.ClaudeDesktopMessage);
+            }
+            if (configureCodex)
+            {
+                Stdout.WriteLine("Codex CLI / ChatGPT Desktop: configured");
+            }
             Stdout.WriteLine("Credential: encrypted with Windows DPAPI");
+            try
+            {
+                KeyStatus status = await KeyCodeClient.CheckAsync(key);
+                Stdout.WriteLine("Key status: " + status.ShortSummary);
+            }
+            catch (Exception ex)
+            {
+                Stdout.WriteLine("Key status unavailable: " + ex.Message);
+            }
             return 0;
         }
 

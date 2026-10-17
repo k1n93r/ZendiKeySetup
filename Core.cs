@@ -59,11 +59,24 @@ namespace ZendiKeySetup
                 return target;
             }
 
+            // Same build already installed (for example the GUI copy is open while the CLI runs):
+            // nothing to copy.
+            if (File.Exists(target) && SameContent(source, target))
+            {
+                return target;
+            }
+
             string pending = target + ".new";
             File.Copy(source, pending, true);
             try
             {
                 File.Copy(pending, target, true);
+            }
+            catch (IOException)
+            {
+                // The installed copy is running (older build). Keep using the current executable
+                // for this session; the next launch from the download will replace it.
+                return source;
             }
             finally
             {
@@ -71,6 +84,31 @@ namespace ZendiKeySetup
             }
 
             return target;
+        }
+
+        private static bool SameContent(string left, string right)
+        {
+            try
+            {
+                FileInfo a = new FileInfo(left);
+                FileInfo b = new FileInfo(right);
+                if (a.Length != b.Length)
+                {
+                    return false;
+                }
+                using (SHA256 sha = SHA256.Create())
+                using (FileStream fa = File.OpenRead(left))
+                using (FileStream fb = File.OpenRead(right))
+                {
+                    byte[] ha = sha.ComputeHash(fa);
+                    byte[] hb = sha.ComputeHash(fb);
+                    return ha.SequenceEqual(hb);
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void TryDelete(string path)
@@ -1153,41 +1191,124 @@ namespace ZendiKeySetup
                     return null;
                 }
 
-                HashSet<string> allowed = new HashSet<string>(
-                    availableModels ?? Enumerable.Empty<string>(),
-                    StringComparer.OrdinalIgnoreCase);
-                List<object> filtered = new List<object>();
-                bool selectedFound = false;
-                foreach (object raw in rawModels)
-                {
-                    Dictionary<string, object> model = Json.AsDictionary(raw);
-                    string slug = model == null ? null : Convert.ToString(GetValue(model, "slug"));
-                    if (!string.IsNullOrWhiteSpace(slug) && allowed.Contains(slug))
-                    {
-                        filtered.Add(raw);
-                        if (string.Equals(slug, selectedModel, StringComparison.OrdinalIgnoreCase))
-                        {
-                            selectedFound = true;
-                        }
-                    }
-                }
-
-                if (!selectedFound)
+                string catalogJson = BuildCodexModelCatalog(rawModels, selectedModel, availableModels);
+                if (catalogJson == null)
                 {
                     return null;
                 }
-
-                Dictionary<string, object> catalog = new Dictionary<string, object>();
-                catalog["models"] = filtered.ToArray();
-                AtomicFile.WriteText(
-                    AppPaths.CodexModelCatalog,
-                    Json.PrettySerialize(catalog) + Environment.NewLine);
+                AtomicFile.WriteText(AppPaths.CodexModelCatalog, catalogJson + Environment.NewLine);
                 return AppPaths.CodexModelCatalog;
             }
             catch
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Builds the Codex model catalog from the bundled catalog of the installed Codex and the
+        /// models the gateway exposes for this key. Every gateway model is included: bundled
+        /// entries are reused, and models the installed Codex does not know yet (for example a
+        /// newer GPT generation on an older Codex) are synthesised from a bundled template so
+        /// they show up in the model picker instead of being silently dropped.
+        /// </summary>
+        internal static string BuildCodexModelCatalog(
+            IEnumerable rawModels,
+            string selectedModel,
+            IEnumerable<string> availableModels)
+        {
+            Dictionary<string, Dictionary<string, object>> bundled =
+                new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> template = null;
+            foreach (object raw in rawModels)
+            {
+                Dictionary<string, object> model = Json.AsDictionary(raw);
+                string slug = model == null ? null : Convert.ToString(GetValue(model, "slug"));
+                if (string.IsNullOrWhiteSpace(slug))
+                {
+                    continue;
+                }
+                bundled[slug] = model;
+                bool listed = string.Equals(Convert.ToString(GetValue(model, "visibility")), "list", StringComparison.OrdinalIgnoreCase);
+                if (slug.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase) && listed &&
+                    (template == null || string.Equals(slug, "gpt-6-sol", StringComparison.OrdinalIgnoreCase)))
+                {
+                    template = model;
+                }
+            }
+
+            List<string> ordered = ModelSelector.CodexCandidates(availableModels, selectedModel);
+            if (ordered.Count == 0)
+            {
+                return null;
+            }
+
+            List<object> entries = new List<object>();
+            int priority = 1;
+            foreach (string slug in ordered)
+            {
+                Dictionary<string, object> existing;
+                Dictionary<string, object> entry;
+                if (bundled.TryGetValue(slug, out existing))
+                {
+                    entry = new Dictionary<string, object>(existing);
+                }
+                else if (template != null)
+                {
+                    entry = new Dictionary<string, object>(template);
+                    entry["slug"] = slug;
+                    entry["display_name"] = PrettyModelName(slug);
+                    entry["description"] = "Available through ZendiKey";
+                }
+                else
+                {
+                    continue;
+                }
+
+                // Keep gateway models visible and selectable, and drop upgrade/migration nags that
+                // point at models this key may not have.
+                entry["visibility"] = "list";
+                entry["supported_in_api"] = true;
+                entry["priority"] = priority++;
+                entry["upgrade"] = null;
+                entry["availability_nux"] = null;
+                entries.Add(entry);
+            }
+
+            if (entries.Count == 0)
+            {
+                return null;
+            }
+
+            Dictionary<string, object> catalog = new Dictionary<string, object>();
+            catalog["models"] = entries.ToArray();
+            return Json.PrettySerialize(catalog);
+        }
+
+        internal static string PrettyModelName(string slug)
+        {
+            string[] parts = (slug ?? string.Empty).Split('-');
+            List<string> output = new List<string>();
+            foreach (string part in parts)
+            {
+                if (part.Length == 0)
+                {
+                    continue;
+                }
+                if (part.Equals("gpt", StringComparison.OrdinalIgnoreCase))
+                {
+                    output.Add("GPT");
+                }
+                else if (char.IsDigit(part[0]))
+                {
+                    output.Add(part);
+                }
+                else
+                {
+                    output.Add(char.ToUpperInvariant(part[0]) + part.Substring(1));
+                }
+            }
+            return string.Join("-", output.ToArray());
         }
 
         private static void WriteClaudeDesktopLocalConfig(
@@ -1987,7 +2108,32 @@ namespace ZendiKeySetup
             }
             else if (installCodex)
             {
-                AddMessage(summary, report, "Codex CLI is already installed.");
+                // Older Codex builds do not know the newest GPT models; refresh to latest so the
+                // bundled catalog and the Responses client match what the gateway offers.
+                CommandResult npmCheck = await Task.Run(delegate
+                {
+                    return CommandRunner.Run("cmd.exe", "/d /s /c \"npm --version\"", 15000);
+                });
+                if (npmCheck.ExitCode == 0)
+                {
+                    AddMessage(summary, report, "Updating Codex CLI to the latest version...");
+                    CommandResult codexUpdate = await Task.Run(delegate
+                    {
+                        return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
+                    });
+                    if (codexUpdate.ExitCode == 0)
+                    {
+                        AddMessage(summary, report, "Codex CLI is up to date.");
+                    }
+                    else
+                    {
+                        AddMessage(summary, report, "Codex CLI update skipped: " + LastUsefulLine(codexUpdate.Output));
+                    }
+                }
+                else
+                {
+                    AddMessage(summary, report, "Codex CLI is already installed.");
+                }
             }
 
             if (installClaude && !before.ClaudeDesktop.Installed)
@@ -2237,6 +2383,25 @@ namespace ZendiKeySetup
             Assert(KeyStatus.QuotaLabel(2500000000L) == "2.5B", "Quota label B");
             Assert(KeyStatus.PackageLabel("gpt", 50000000, false) == "GPT 50M", "Package label");
             Assert(KeyStatus.PackageLabel("claude", 0, true) == "CLAUDE UNLIMITED", "Unlimited label");
+            Assert(ConfigManager.PrettyModelName("gpt-6.1-sol") == "GPT-6.1-Sol", "Pretty model name");
+
+            // Catalog: bundled knows gpt-5.6-sol only; the gateway also offers gpt-6.1-sol, which
+            // must be synthesised from the bundled template instead of being dropped.
+            string bundledJson = "{\"models\":[{\"slug\":\"gpt-5.6-sol\",\"display_name\":\"GPT-5.6-Sol\",\"visibility\":\"list\",\"priority\":5,\"upgrade\":{\"model\":\"x\"},\"context_window\":272000}]}";
+            IEnumerable bundledModels = Json.DeserializeDictionary(bundledJson)["models"] as IEnumerable;
+            string catalog = ConfigManager.BuildCodexModelCatalog(bundledModels, "gpt-6.1-sol", new[] { "gpt-5.6-sol", "gpt-6.1-sol", "claude-opus-5" });
+            Dictionary<string, object> parsed = Json.DeserializeDictionary(catalog);
+            List<Dictionary<string, object>> entries = new List<Dictionary<string, object>>();
+            foreach (object raw in (IEnumerable)parsed["models"])
+            {
+                entries.Add(Json.AsDictionary(raw));
+            }
+            Assert(entries.Count == 3, "Catalog keeps every gateway model");
+            Assert(Convert.ToString(entries[0]["slug"]) == "gpt-6.1-sol", "Selected model first");
+            Assert(Convert.ToString(entries[0]["display_name"]) == "GPT-6.1-Sol", "Synthesised display name");
+            Assert(Convert.ToString(entries[0]["context_window"]) == "272000", "Template fields copied");
+            Assert(entries[1]["upgrade"] == null, "Upgrade nag removed");
+            Assert(Convert.ToString(entries[2]["slug"]) == "claude-opus-5", "Non-gpt gateway model included");
         }
 
         private static void TestDpapi()
