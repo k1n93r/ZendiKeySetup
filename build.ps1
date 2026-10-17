@@ -179,6 +179,7 @@ if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
 $sources = @(
     (Join-Path $project 'Program.cs'),
     (Join-Path $project 'Core.cs'),
+    (Join-Path $project 'Integration.cs'),
     (Join-Path $project 'MainForm.cs')
 )
 

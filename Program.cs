@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
 [assembly: AssemblyCopyright("Copyright 2026")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace ZendiKeySetup
 {
@@ -75,9 +75,36 @@ namespace ZendiKeySetup
                 {
                 }
 
+                // Keep a stable copy in %LocalAppData% and point zendikey:// links at it so
+                // Telegram/web "open in app" links keep working after the download is deleted.
+                string initialInput = null;
+                try
+                {
+                    string installedExe = InstalledApp.EnsureCurrentCopy();
+                    ProtocolRegistrar.Register(installedExe);
+                }
+                catch
+                {
+                }
+                int i;
+                for (i = 0; i < args.Length; i++)
+                {
+                    string fromLink = KeyCodeClient.FromProtocolLink(args[i]);
+                    if (!string.IsNullOrWhiteSpace(fromLink))
+                    {
+                        initialInput = fromLink;
+                        break;
+                    }
+                    if (KeyCodeClient.IsZenCode(args[i]) || args[i].StartsWith("sk-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        initialInput = args[i].Trim();
+                        break;
+                    }
+                }
+
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new MainForm());
+                Application.Run(new MainForm(initialInput));
                 return 0;
             }
             catch (Exception ex)
@@ -161,6 +188,13 @@ namespace ZendiKeySetup
 
         private static async Task<int> ApplyKey(string key)
         {
+            if (KeyCodeClient.IsZenCode(key))
+            {
+                Stdout.WriteLine("Exchanging code " + KeyCodeClient.NormalizeCode(key) + " for a key ...");
+                KeyCodeResult claimed = await KeyCodeClient.ClaimAsync(key);
+                key = claimed.Key;
+                Stdout.WriteLine("Package: " + claimed.Summary + (claimed.Recovered ? " (recovered)" : string.Empty));
+            }
 
             Stdout.WriteLine("Checking https://zendigikey.shop/v1 ...");
             GatewayCheckResult check = await GatewayClient.CheckAsync(key, null, null, false);

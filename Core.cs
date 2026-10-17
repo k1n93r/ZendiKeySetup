@@ -2177,6 +2177,7 @@ namespace ZendiKeySetup
                 TestClaudeMerge();
                 TestCodexMerge();
                 TestDpapi();
+                TestKeyCodes();
                 Stdout.WriteLine("Self-test passed: " + _passed.ToString(CultureInfo.InvariantCulture) + " checks");
                 return 0;
             }
@@ -2220,6 +2221,22 @@ namespace ZendiKeySetup
             Assert(Count(merged, "[model_providers.zendigikey]") == 1, "Codex provider replaced once");
             Assert(merged.Contains("[model_providers.zendigikey.auth]"), "Codex credential helper");
             Assert(merged.Contains("C:\\\\Test App\\\\helper.exe"), "Codex Windows path escaped");
+        }
+
+        private static void TestKeyCodes()
+        {
+            Assert(KeyCodeClient.IsZenCode("ZEN-ABC-123-XYZ"), "ZEN code recognised");
+            Assert(KeyCodeClient.IsZenCode("  zen-abc-123-xyz "), "ZEN code case/space tolerant");
+            Assert(!KeyCodeClient.IsZenCode("sk-abc"), "sk key is not a code");
+            Assert(KeyCodeClient.FromProtocolLink("zendikey://ZEN-ABC-123-XYZ") == "ZEN-ABC-123-XYZ", "Link with code");
+            Assert(KeyCodeClient.FromProtocolLink("zendikey://open/ZEN-ABC-123-XYZ/") == "ZEN-ABC-123-XYZ", "Link with path");
+            Assert(KeyCodeClient.FromProtocolLink("zendikey:sk-test123") == "sk-test123", "Link with key");
+            Assert(KeyCodeClient.FromProtocolLink("https://example.com") == null, "Non zendikey link ignored");
+            Assert(KeyStatus.QuotaLabel(100000000) == "100M", "Quota label M");
+            Assert(KeyStatus.QuotaLabel(61200000) == "61.2M", "Quota label fraction");
+            Assert(KeyStatus.QuotaLabel(2500000000L) == "2.5B", "Quota label B");
+            Assert(KeyStatus.PackageLabel("gpt", 50000000, false) == "GPT 50M", "Package label");
+            Assert(KeyStatus.PackageLabel("claude", 0, true) == "CLAUDE UNLIMITED", "Unlimited label");
         }
 
         private static void TestDpapi()

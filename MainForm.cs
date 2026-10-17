@@ -44,9 +44,16 @@ namespace ZendiKeySetup
         private StatusDisplay _claudeDesktopStatus;
         private StatusDisplay _chatGptStatus;
         private bool _busy;
+        private readonly string _initialInput;
 
         internal MainForm()
+            : this(null)
         {
+        }
+
+        internal MainForm(string initialInput)
+        {
+            _initialInput = string.IsNullOrWhiteSpace(initialInput) ? null : initialInput.Trim();
             Text = "ZendiKey Setup";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(860, 680);
@@ -247,7 +254,7 @@ namespace ZendiKeySetup
             keyArea.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
             keyArea.Margin = new Padding(0);
 
-            Label keyLabel = FieldLabel("API key");
+            Label keyLabel = FieldLabel("API key or ZEN code (ZEN-XXX-XXX-XXX)");
             keyArea.Controls.Add(keyLabel, 0, 0);
             keyArea.SetColumnSpan(keyLabel, 2);
 
@@ -425,7 +432,18 @@ namespace ZendiKeySetup
                 LoadExistingCredential();
                 LoadConfiguredModels();
                 Log("Ready. Gateway: " + AppPaths.BaseUrl);
+                if (_initialInput != null)
+                {
+                    _keyBox.Text = _initialInput;
+                    _keyBox.SelectionStart = _keyBox.TextLength;
+                    SetKeyState(KeyCodeClient.IsZenCode(_initialInput) ? "Code from link" : "Key from link", Success);
+                    Log("Opened from link with " + (KeyCodeClient.IsZenCode(_initialInput) ? "code " + KeyCodeClient.NormalizeCode(_initialInput) : "a key") + ".");
+                }
                 await RefreshStatusAsync();
+                if (_initialInput != null)
+                {
+                    await SetupSelectedAsync();
+                }
             };
 
             _showKey.CheckedChanged += delegate
@@ -506,7 +524,7 @@ namespace ZendiKeySetup
             string key = _keyBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(key))
             {
-                MessageBox.Show(this, "Enter a ZendiKey API key first.", "ZendiKey Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Enter a ZendiKey API key or a ZEN code first.", "ZendiKey Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _keyBox.Focus();
                 return null;
             }
@@ -514,6 +532,7 @@ namespace ZendiKeySetup
             SetBusy(true, "Testing gateway...");
             try
             {
+                key = await ResolveInputAsync(key);
                 Log("Checking available models...");
                 GatewayCheckResult models = await GatewayClient.CheckAsync(key, null, null, false);
                 if (!models.ModelsOk)
@@ -565,6 +584,7 @@ namespace ZendiKeySetup
                     {
                         Log("Responses API: " + models.CodexMessage + ".");
                     }
+                    await ShowKeyStatusAsync(key);
                 }
                 else
                 {
@@ -606,7 +626,7 @@ namespace ZendiKeySetup
             string key = _keyBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(key))
             {
-                MessageBox.Show(this, "Enter a ZendiKey API key first.", "ZendiKey Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Enter a ZendiKey API key or a ZEN code first.", "ZendiKey Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _keyBox.Focus();
                 return;
             }
@@ -614,6 +634,7 @@ namespace ZendiKeySetup
             SetBusy(true, "Setting up clients...");
             try
             {
+                key = await ResolveInputAsync(key);
                 Log("Reading models from gateway...");
                 GatewayCheckResult first = await GatewayClient.CheckAsync(key, null, null, false);
                 if (!first.ModelsOk)
@@ -695,6 +716,7 @@ namespace ZendiKeySetup
                 Log("Encrypted backup: " + applied.BackupDirectory);
 
                 await RefreshStatusCoreAsync();
+                await ShowKeyStatusAsync(key);
                 SetOverall("Setup complete", installSuccess ? Success : Warning);
                 string successMessage = setupClaude && setupCodex
                     ? "Setup completed. Restart Claude Desktop and ChatGPT before using the new configuration."
@@ -719,6 +741,43 @@ namespace ZendiKeySetup
             finally
             {
                 SetBusy(false, null);
+            }
+        }
+
+        /// <summary>
+        /// Accepts either an sk- key or a ZEN-XXX-XXX-XXX code. A code is exchanged for its
+        /// key through the gateway (recovering it if it was already claimed) and the key box
+        /// is updated so the rest of the flow works with the real key.
+        /// </summary>
+        private async Task<string> ResolveInputAsync(string input)
+        {
+            if (!KeyCodeClient.IsZenCode(input))
+            {
+                return input;
+            }
+
+            string code = KeyCodeClient.NormalizeCode(input);
+            Log("Exchanging code " + code + " for a key...");
+            KeyCodeResult claimed = await KeyCodeClient.ClaimAsync(code);
+            _keyBox.Text = claimed.Key;
+            _keyBox.SelectionStart = _keyBox.TextLength;
+            Log((claimed.Recovered ? "Key recovered: " : "Key received: ") + claimed.Summary + ".");
+            SetKeyState(claimed.Summary, Success);
+            return claimed.Key;
+        }
+
+        /// <summary>Shows package, remaining credit and expiry of the key from the public check endpoint.</summary>
+        private async Task ShowKeyStatusAsync(string key)
+        {
+            try
+            {
+                KeyStatus status = await KeyCodeClient.CheckAsync(key);
+                Log("Key status: " + status.ShortSummary + ".");
+                SetKeyState(status.ShortSummary, status.Active ? Success : Warning);
+            }
+            catch (Exception ex)
+            {
+                Log("Key status unavailable: " + ex.Message);
             }
         }
 
