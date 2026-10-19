@@ -17,6 +17,7 @@ Cài đặt ZendiKey cho Codex CLI và app ChatGPT (Codex mode) trên Windows. D
 - **Codex CLI** được tải thẳng từ GitHub (bản standalone, không cần Node.js, không cần quyền admin) vào `%LocalAppData%\Programs\Codex`. Máy đã có npm thì cài qua npm.
 - **App ChatGPT** cài qua Microsoft Store (winget). Nếu winget lỗi, ứng dụng tự mở trang Store đúng app, bạn chỉ cần bấm Install.
 - Claude Code / Claude Desktop tạm ẩn (chưa bán).
+- Nút **Reset to default** gỡ toàn bộ cấu hình ZendiKey khỏi Codex CLI / app ChatGPT (app vẫn còn, đăng nhập tài khoản riêng bình thường). **Restore latest** đưa cấu hình ZendiKey trở lại.
 
 ## Mở bằng link
 
@@ -33,5 +34,6 @@ ZendiKeySetup.exe --status                 # trạng thái app + cấu hình
 echo ZEN-XXX-XXX-XXX | ZendiKeySetup.exe --apply-stdin   # cài Codex không cần giao diện
 ZendiKeySetup.exe --install-missing        # cài Codex CLI + app ChatGPT nếu thiếu
 ZendiKeySetup.exe --install-codex-portable # ép cài Codex CLI bản standalone
+ZendiKeySetup.exe --reset-default          # gỡ cấu hình ZendiKey, trả Codex/ChatGPT về mặc định gốc
 ZendiKeySetup.exe --restore-latest         # khôi phục cấu hình trước khi cài
 ```

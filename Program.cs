@@ -73,6 +73,13 @@ namespace ZendiKeySetup
                     return InstallMissing().GetAwaiter().GetResult();
                 }
 
+                if (HasArgument(args, "--reset-default"))
+                {
+                    string backupDir = ConfigManager.ResetToDefault();
+                    Stdout.WriteLine("ZendiKey configuration removed. Backup: " + backupDir);
+                    return 0;
+                }
+
                 if (HasArgument(args, "--restore-latest"))
                 {
                     string restored = ConfigManager.RestoreLatestBackup();

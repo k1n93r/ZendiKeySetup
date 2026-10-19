@@ -1103,6 +1103,99 @@ namespace ZendiKeySetup
             }
         }
 
+        /// <summary>
+        /// Removes everything ZendiKey Setup wrote so Codex CLI, the ChatGPT app and (if it was
+        /// configured) Claude go back to their stock settings and their own login. A backup is
+        /// created first so "Restore latest" can bring the ZendiKey configuration back.
+        /// </summary>
+        internal static string ResetToDefault()
+        {
+            string backup = BackupManager.Create();
+
+            if (File.Exists(AppPaths.CodexConfig))
+            {
+                string cleaned = Toml.RemoveZendi(File.ReadAllText(AppPaths.CodexConfig));
+                if (string.IsNullOrWhiteSpace(cleaned))
+                {
+                    File.Delete(AppPaths.CodexConfig);
+                }
+                else
+                {
+                    AtomicFile.WriteText(AppPaths.CodexConfig, cleaned);
+                }
+            }
+            DeleteIfExists(AppPaths.CodexModelCatalog);
+
+            if (IsClaudeConfigured())
+            {
+                Dictionary<string, object> settings = Json.DeserializeDictionary(File.ReadAllText(AppPaths.ClaudeSettings));
+                Dictionary<string, object> env = Json.AsDictionary(GetValue(settings, "env"));
+                if (env != null)
+                {
+                    env.Remove("ANTHROPIC_BASE_URL");
+                    env.Remove("ANTHROPIC_DEFAULT_OPUS_MODEL");
+                    env.Remove("ANTHROPIC_DEFAULT_SONNET_MODEL");
+                    env.Remove("ANTHROPIC_DEFAULT_HAIKU_MODEL");
+                    env.Remove("ANTHROPIC_DEFAULT_FABLE_MODEL");
+                    if (env.Count == 0)
+                    {
+                        settings.Remove("env");
+                    }
+                }
+                settings.Remove("model");
+                settings.Remove("apiKeyHelper");
+                AtomicFile.WriteText(AppPaths.ClaudeSettings, Json.PrettySerialize(settings) + Environment.NewLine);
+            }
+
+            if (File.Exists(AppPaths.ClaudeDesktopMeta))
+            {
+                try
+                {
+                    Dictionary<string, object> meta = Json.DeserializeDictionary(File.ReadAllText(AppPaths.ClaudeDesktopMeta));
+                    List<object> entries = new List<object>();
+                    IEnumerable existing = GetValue(meta, "entries") as IEnumerable;
+                    if (existing != null)
+                    {
+                        foreach (object raw in existing)
+                        {
+                            Dictionary<string, object> entry = Json.AsDictionary(raw);
+                            if (entry == null || !string.Equals(Convert.ToString(GetValue(entry, "id")), LocalClaudeConfigId, StringComparison.OrdinalIgnoreCase))
+                            {
+                                entries.Add(raw);
+                            }
+                        }
+                    }
+                    meta["entries"] = entries.ToArray();
+                    if (string.Equals(Convert.ToString(GetValue(meta, "appliedId")), LocalClaudeConfigId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        meta.Remove("appliedId");
+                    }
+                    AtomicFile.WriteText(AppPaths.ClaudeDesktopMeta, Json.PrettySerialize(meta) + Environment.NewLine);
+                }
+                catch
+                {
+                }
+                DeleteIfExists(AppPaths.ClaudeDesktopLocalConfig);
+            }
+
+            DeleteIfExists(AppPaths.CredentialFile);
+            return backup;
+        }
+
+        private static void DeleteIfExists(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+            }
+        }
+
         internal static string RestoreLatestBackup()
         {
             if (!Directory.Exists(AppPaths.BackupDirectory))
@@ -1568,6 +1661,53 @@ namespace ZendiKeySetup
             kept.Add("args = [\"--credential\"]");
 
             return string.Join(Environment.NewLine, kept.ToArray()) + Environment.NewLine;
+        }
+
+        /// <summary>
+        /// Drops the ZendiKey provider sections and, when ZendiKey was the active provider, the
+        /// top-level model / provider / catalog keys it wrote. Everything else is kept verbatim.
+        /// </summary>
+        internal static string RemoveZendi(string content)
+        {
+            string normalized = (content ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+            List<string> kept = new List<string>();
+            bool skip = false;
+            foreach (string line in normalized.Split('\n'))
+            {
+                if (SectionPattern.IsMatch(line))
+                {
+                    skip = ZendiSectionPattern.IsMatch(line);
+                }
+                if (!skip)
+                {
+                    kept.Add(line);
+                }
+            }
+
+            int firstSection = kept.FindIndex(delegate(string line) { return SectionPattern.IsMatch(line); });
+            if (firstSection < 0)
+            {
+                firstSection = kept.Count;
+            }
+            Regex provider = new Regex(@"^\s*model_provider\s*=\s*[""']" + Regex.Escape(AppPaths.ProviderId) + @"[""']", RegexOptions.IgnoreCase);
+            bool ours = kept.Take(firstSection).Any(delegate(string line) { return provider.IsMatch(line); });
+            if (ours)
+            {
+                Regex managed = new Regex(@"^\s*(model_provider|model|review_model|model_catalog_json)\s*=", RegexOptions.IgnoreCase);
+                for (int i = firstSection - 1; i >= 0; i--)
+                {
+                    if (managed.IsMatch(kept[i]))
+                    {
+                        kept.RemoveAt(i);
+                    }
+                }
+            }
+
+            while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[kept.Count - 1]))
+            {
+                kept.RemoveAt(kept.Count - 1);
+            }
+            return kept.Count == 0 ? string.Empty : string.Join(Environment.NewLine, kept.ToArray()) + Environment.NewLine;
         }
 
         private static void SetTopLevel(List<string> lines, int firstSection, string name, string value)
@@ -2754,6 +2894,14 @@ namespace ZendiKeySetup
             Assert(Count(merged, "[model_providers.zendigikey]") == 1, "Codex provider replaced once");
             Assert(merged.Contains("[model_providers.zendigikey.auth]"), "Codex credential helper");
             Assert(merged.Contains("C:\\\\Test App\\\\helper.exe"), "Codex Windows path escaped");
+
+            string reset = Toml.RemoveZendi(merged);
+            Assert(!reset.Contains("zendigikey"), "Reset removes ZendiKey provider");
+            Assert(!reset.Contains("model = "), "Reset removes model written by ZendiKey");
+            Assert(reset.Contains("[features]") && reset.Contains("goals = true"), "Reset keeps unrelated section");
+            string foreign = "model_provider = \"other\"\nmodel = \"x\"\n\n[model_providers.zendigikey]\nbase_url = \"https://old.invalid\"\n";
+            string resetForeign = Toml.RemoveZendi(foreign);
+            Assert(resetForeign.Contains("model_provider = \"other\"") && resetForeign.Contains("model = \"x\"") && !resetForeign.Contains("zendigikey"), "Reset keeps a foreign provider's model");
         }
 
         private static void TestKeyCodes()

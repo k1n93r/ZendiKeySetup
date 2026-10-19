@@ -37,6 +37,7 @@ namespace ZendiKeySetup
         private Button _setupButton;
         private Button _installButton;
         private Button _restoreButton;
+        private Button _resetButton;
         private Button _refreshButton;
         private Button _clearLogButton;
         private Label _keyState;
@@ -396,8 +397,9 @@ namespace ZendiKeySetup
 
             TableLayoutPanel bar = new TableLayoutPanel();
             bar.Dock = DockStyle.Fill;
-            bar.ColumnCount = 4;
+            bar.ColumnCount = 5;
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 126F));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 126F));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 126F));
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62F));
@@ -414,10 +416,15 @@ namespace ZendiKeySetup
             _restoreButton.Margin = new Padding(4, 0, 4, 5);
             bar.Controls.Add(_restoreButton, 2, 0);
 
+            _resetButton = MakeButton("Reset to default", ButtonKind.Compact);
+            _resetButton.Dock = DockStyle.Fill;
+            _resetButton.Margin = new Padding(4, 0, 4, 5);
+            bar.Controls.Add(_resetButton, 3, 0);
+
             _clearLogButton = MakeButton("Clear", ButtonKind.Compact);
             _clearLogButton.Dock = DockStyle.Fill;
             _clearLogButton.Margin = new Padding(4, 0, 0, 5);
-            bar.Controls.Add(_clearLogButton, 3, 0);
+            bar.Controls.Add(_clearLogButton, 4, 0);
             layout.Controls.Add(bar, 0, 0);
 
             _log = new RichTextBox();
@@ -484,6 +491,7 @@ namespace ZendiKeySetup
             _setupButton.Click += async delegate { await SetupSelectedAsync(); };
             _installButton.Click += async delegate { await InstallMissingAsync(); };
             _restoreButton.Click += async delegate { await RestoreLatestAsync(); };
+            _resetButton.Click += async delegate { await ResetToDefaultAsync(); };
             _clearLogButton.Click += delegate { _log.Clear(); };
 
             KeyDown += async delegate(object sender, KeyEventArgs args)
@@ -926,6 +934,47 @@ namespace ZendiKeySetup
             }
         }
 
+        private async Task ResetToDefaultAsync()
+        {
+            if (_busy)
+            {
+                return;
+            }
+
+            DialogResult confirmation = MessageBox.Show(
+                this,
+                "Remove the ZendiKey configuration from Codex CLI and the ChatGPT app (and Claude, if it was set up) and go back to their default settings?\n\nThe apps stay installed and will use your own login again. The saved key is deleted. A backup is kept, so Restore latest can bring ZendiKey back.",
+                "Reset to default",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (confirmation != DialogResult.Yes)
+            {
+                return;
+            }
+
+            SetBusy(true, "Resetting to default...");
+            try
+            {
+                string backup = await Task.Run(delegate { return ConfigManager.ResetToDefault(); });
+                Log("ZendiKey configuration removed. Backup: " + backup);
+                _keyBox.Text = string.Empty;
+                SetKeyState("Not tested", Muted);
+                await RefreshStatusCoreAsync();
+                SetOverall("Default settings restored", Success);
+                MessageBox.Show(this, "Done. Codex CLI and the ChatGPT app are back to their default settings. Restart the ChatGPT app before signing in.", "Reset to default", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Log("Reset failed: " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Reset failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                SetBusy(false, null);
+            }
+        }
+
         private async Task RefreshStatusAsync()
         {
             if (_busy)
@@ -1055,6 +1104,7 @@ namespace ZendiKeySetup
             _busy = busy;
             _progress.Visible = busy;
             _restoreButton.Enabled = !busy;
+            _resetButton.Enabled = !busy;
             _refreshButton.Enabled = !busy;
             _keyBox.Enabled = !busy;
             _showKey.Enabled = !busy;
