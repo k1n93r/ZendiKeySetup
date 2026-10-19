@@ -1,6 +1,6 @@
 # ZendiKey Setup
 
-Cài đặt ZendiKey cho Claude hoặc Codex/ChatGPT trên Windows.
+Cài đặt ZendiKey cho Codex CLI và app ChatGPT (Codex mode) trên Windows. Dùng được cả key **GPT** lẫn key **GEMINI (Antigravity)**.
 
 ![Giao diện ZendiKey Setup](assets/zendikey-setup.png)
 
@@ -8,16 +8,30 @@ Cài đặt ZendiKey cho Claude hoặc Codex/ChatGPT trên Windows.
 
 1. [Tải ZendiKeySetup.exe](https://github.com/k1n93r/ZendiKeySetup/releases/latest/download/ZendiKeySetup.exe).
 2. Mở file vừa tải và dán **mã ZEN-XXX-XXX-XXX** (hoặc API key `sk-...`).
-3. Chọn **Claude**, **Codex / ChatGPT**, hoặc cả hai.
+3. Bấm **Test key**: ứng dụng kiểm tra key, báo app nào chưa cài (Codex CLI, app ChatGPT) và cho bạn chọn cài cái nào.
 4. Bấm **Set up selected** và chờ thông báo hoàn tất.
-5. Mở lại Claude hoặc ChatGPT để sử dụng.
+5. Mở app ChatGPT (Codex mode) hoặc gõ `codex` trong terminal mới để dùng.
 
-Ứng dụng sẽ tự đổi mã lấy key, kiểm tra key, chọn model phù hợp, cài thành phần còn thiếu và hiển thị gói / số dư / hạn dùng của key.
+Ứng dụng tự đổi mã lấy key, kiểm tra key, chọn model tốt nhất của key (GPT hoặc Gemini), cài thành phần còn thiếu và hiển thị gói / số dư / hạn dùng của key.
+
+- **Codex CLI** được tải thẳng từ GitHub (bản standalone, không cần Node.js, không cần quyền admin) vào `%LocalAppData%\Programs\Codex`. Máy đã có npm thì cài qua npm.
+- **App ChatGPT** cài qua Microsoft Store (winget). Nếu winget lỗi, ứng dụng tự mở trang Store đúng app, bạn chỉ cần bấm Install.
+- Claude Code / Claude Desktop tạm ẩn (chưa bán).
 
 ## Mở bằng link
 
 Sau lần chạy đầu tiên, ứng dụng đăng ký link dạng `zendikey://`. Bấm link
-`https://zendigikey.shop/open/ZEN-XXX-XXX-XXX` (hoặc `zendikey://ZEN-XXX-XXX-XXX`)
+`https://zendigikey.shop/check?code=ZEN-XXX-XXX-XXX` rồi **Install on this PC** (hoặc `zendikey://ZEN-XXX-XXX-XXX`)
 sẽ mở ứng dụng với mã đã điền sẵn và tự chạy cài đặt.
 
 Nếu Windows hiện cảnh báo SmartScreen, chọn **More info** rồi **Run anyway**.
+
+## Dòng lệnh
+
+```
+ZendiKeySetup.exe --status                 # trạng thái app + cấu hình
+echo ZEN-XXX-XXX-XXX | ZendiKeySetup.exe --apply-stdin   # cài Codex không cần giao diện
+ZendiKeySetup.exe --install-missing        # cài Codex CLI + app ChatGPT nếu thiếu
+ZendiKeySetup.exe --install-codex-portable # ép cài Codex CLI bản standalone
+ZendiKeySetup.exe --restore-latest         # khôi phục cấu hình trước khi cài
+```

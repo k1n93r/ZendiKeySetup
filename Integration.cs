@@ -244,7 +244,7 @@ namespace ZendiKeySetup
             HttpClient client = new HttpClient();
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.1");
+            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.2");
             return client;
         }
 

@@ -9,12 +9,12 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("ZendiKey Setup")]
-[assembly: AssemblyDescription("Configure Claude and Codex clients for zendigikey.shop")]
+[assembly: AssemblyDescription("Configure Codex (GPT and Gemini keys) for zendigikey.shop")]
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
 [assembly: AssemblyCopyright("Copyright 2026")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace ZendiKeySetup
 {
@@ -45,10 +45,18 @@ namespace ZendiKeySetup
                     return CommandLineStatus();
                 }
 
-                bool codexOnly = HasArgument(args, "--codex-only");
+                // Claude setup is paused: the CLI configures Codex only unless --claude-only is
+                // passed explicitly (--codex-only is kept for older scripts).
                 bool claudeOnly = HasArgument(args, "--claude-only");
-                bool configureClaude = !codexOnly;
+                bool configureClaude = claudeOnly;
                 bool configureCodex = !claudeOnly;
+
+                if (HasArgument(args, "--install-codex-portable"))
+                {
+                    InstallResult portable = new InstallResult { Success = true };
+                    bool ok = InstallManager.InstallCodexPortableAsync(Stdout.WriteLine, portable).GetAwaiter().GetResult();
+                    return ok ? 0 : 1;
+                }
 
                 if (HasArgument(args, "--apply-existing"))
                 {
@@ -160,6 +168,7 @@ namespace ZendiKeySetup
             Stdout.WriteLine("Codex CLI: " + status.CodexCli.DisplayValue);
             Stdout.WriteLine("Claude Desktop: " + status.ClaudeDesktop.DisplayValue);
             Stdout.WriteLine("ChatGPT Desktop: " + status.ChatGptDesktop.DisplayValue);
+            Stdout.WriteLine("Codex portable: " + (File.Exists(InstallManager.CodexPortableExe) ? InstallManager.CodexPortableExe : "not used"));
             Stdout.WriteLine("Encrypted key: " + (CredentialStore.Exists ? "present" : "missing"));
             Stdout.WriteLine("Claude config: " + (ConfigManager.IsClaudeConfigured() ? "zendigikey" : "other"));
             Stdout.WriteLine("Codex config: " + (ConfigManager.IsCodexConfigured() ? "zendigikey" : "other"));
@@ -262,7 +271,7 @@ namespace ZendiKeySetup
 
         private static async Task<int> InstallMissing()
         {
-            InstallResult result = await InstallManager.InstallMissingAsync(Stdout.WriteLine);
+            InstallResult result = await InstallManager.InstallMissingAsync(Stdout.WriteLine, false, true);
             return result.Success ? 0 : 1;
         }
 

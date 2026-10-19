@@ -22,6 +22,10 @@ namespace ZendiKeySetup
         private static readonly Color Warning = Color.FromArgb(181, 116, 20);
         private static readonly Color Neutral = Color.FromArgb(137, 143, 146);
 
+        // Claude Code / Claude Desktop setup is paused for customers (19/10/2026). Flip to true to
+        // show the Claude controls again; all the Claude code paths are kept intact.
+        private const bool ClaudeEnabled = false;
+
         private TextBox _keyBox;
         private CheckBox _showKey;
         private CheckBox _setupClaude;
@@ -179,31 +183,32 @@ namespace ZendiKeySetup
             layout.Dock = DockStyle.Fill;
             layout.Padding = new Padding(16, 12, 16, 14);
             layout.ColumnCount = 1;
-            layout.RowCount = 7;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
-
-            Label heading = SectionHeading("Clients");
-            layout.Controls.Add(heading, 0, 0);
 
             _claudeCodeStatus = new StatusDisplay("Claude Code");
             _codexStatus = new StatusDisplay("Codex CLI");
             _claudeDesktopStatus = new StatusDisplay("Claude Desktop");
-            _chatGptStatus = new StatusDisplay("ChatGPT - Codex mode");
-            layout.Controls.Add(_claudeCodeStatus, 0, 1);
-            layout.Controls.Add(_codexStatus, 0, 2);
-            layout.Controls.Add(_claudeDesktopStatus, 0, 3);
-            layout.Controls.Add(_chatGptStatus, 0, 4);
+            _chatGptStatus = new StatusDisplay("ChatGPT app (Codex mode)");
+            List<StatusDisplay> rows = ClaudeEnabled
+                ? new List<StatusDisplay> { _claudeCodeStatus, _codexStatus, _claudeDesktopStatus, _chatGptStatus }
+                : new List<StatusDisplay> { _codexStatus, _chatGptStatus };
+
+            layout.RowCount = rows.Count + 3;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+            layout.Controls.Add(SectionHeading("Clients"), 0, 0);
+            int row = 1;
+            foreach (StatusDisplay display in rows)
+            {
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
+                layout.Controls.Add(display, 0, row++);
+            }
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            row++;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
 
             _refreshButton = MakeButton("Refresh status", ButtonKind.Neutral);
             _refreshButton.Dock = DockStyle.Fill;
             _refreshButton.Margin = new Padding(0, 4, 0, 0);
-            layout.Controls.Add(_refreshButton, 0, 6);
+            layout.Controls.Add(_refreshButton, 0, row);
 
             panel.Controls.Add(layout);
             return panel;
@@ -217,13 +222,14 @@ namespace ZendiKeySetup
             layout.Dock = DockStyle.Fill;
             layout.Padding = new Padding(20, 12, 20, 14);
             layout.ColumnCount = 1;
-            layout.RowCount = 8;
+            layout.RowCount = 9;
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 67F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 43F));
 
@@ -282,24 +288,26 @@ namespace ZendiKeySetup
             models.Dock = DockStyle.Fill;
             models.ColumnCount = 2;
             models.RowCount = 2;
-            models.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            models.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            models.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, ClaudeEnabled ? 50F : 0F));
+            models.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, ClaudeEnabled ? 50F : 100F));
             models.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
             models.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
             models.Margin = new Padding(0, 0, 0, 0);
 
             Label claudeLabel = FieldLabel("Claude");
             claudeLabel.Margin = new Padding(0, 0, 6, 0);
+            claudeLabel.Visible = ClaudeEnabled;
             models.Controls.Add(claudeLabel, 0, 0);
-            Label codexLabel = FieldLabel("Codex");
-            codexLabel.Margin = new Padding(6, 0, 0, 0);
+            Label codexLabel = FieldLabel(ClaudeEnabled ? "Codex" : "Codex model (GPT or Gemini)");
+            codexLabel.Margin = new Padding(ClaudeEnabled ? 6 : 0, 0, 0, 0);
             models.Controls.Add(codexLabel, 1, 0);
 
             _claudeModel = ModelCombo();
             _claudeModel.Margin = new Padding(0, 1, 6, 0);
+            _claudeModel.Visible = ClaudeEnabled;
             models.Controls.Add(_claudeModel, 0, 1);
             _codexModel = ModelCombo();
-            _codexModel.Margin = new Padding(6, 1, 0, 0);
+            _codexModel.Margin = new Padding(ClaudeEnabled ? 6 : 0, 1, 0, 0);
             models.Controls.Add(_codexModel, 1, 1);
             layout.Controls.Add(models, 0, 3);
 
@@ -318,14 +326,19 @@ namespace ZendiKeySetup
             _setupClaude = new CheckBox();
             _setupClaude.Dock = DockStyle.Fill;
             _setupClaude.Text = "Claude";
-            _setupClaude.Checked = true;
+            _setupClaude.Checked = ClaudeEnabled;
+            _setupClaude.Visible = ClaudeEnabled;
             _setupClaude.ForeColor = Ink;
             _setupClaude.Margin = new Padding(0, 3, 8, 0);
             targets.Controls.Add(_setupClaude, 1, 0);
+            if (!ClaudeEnabled)
+            {
+                targets.ColumnStyles[1].Width = 0F;
+            }
 
             _setupCodex = new CheckBox();
             _setupCodex.Dock = DockStyle.Fill;
-            _setupCodex.Text = "Codex / ChatGPT";
+            _setupCodex.Text = ClaudeEnabled ? "Codex / ChatGPT" : "Codex CLI + ChatGPT app";
             _setupCodex.Checked = true;
             _setupCodex.ForeColor = Ink;
             _setupCodex.Margin = new Padding(0, 3, 0, 0);
@@ -334,11 +347,16 @@ namespace ZendiKeySetup
 
             _installMissing = new CheckBox();
             _installMissing.Dock = DockStyle.Fill;
-            _installMissing.Text = "Install missing apps and CLIs";
+            _installMissing.Text = "Check for missing apps and let me pick what to install";
             _installMissing.Checked = true;
             _installMissing.ForeColor = Ink;
             _installMissing.Margin = new Padding(0, 5, 0, 0);
             layout.Controls.Add(_installMissing, 0, 5);
+
+            Label hint = FieldLabel("GPT keys and GEMINI (Antigravity) keys both work here: Codex is set up with the best model your key has.");
+            hint.Font = new Font("Segoe UI", 8.2F, FontStyle.Regular, GraphicsUnit.Point);
+            hint.TextAlign = ContentAlignment.TopLeft;
+            layout.Controls.Add(hint, 0, 6);
 
             TableLayoutPanel primaryActions = new TableLayoutPanel();
             primaryActions.Dock = DockStyle.Bottom;
@@ -357,7 +375,7 @@ namespace ZendiKeySetup
             _setupButton.Dock = DockStyle.Fill;
             _setupButton.Margin = new Padding(0);
             primaryActions.Controls.Add(_setupButton, 1, 0);
-            layout.Controls.Add(primaryActions, 0, 7);
+            layout.Controls.Add(primaryActions, 0, 8);
 
             panel.Controls.Add(layout);
             return panel;
@@ -517,7 +535,7 @@ namespace ZendiKeySetup
             bool setupCodex = _setupCodex.Checked;
             if (!setupClaude && !setupCodex)
             {
-                MessageBox.Show(this, "Select Claude, Codex, or both first.", "Nothing selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, NothingSelectedMessage, "Nothing selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return null;
             }
 
@@ -585,6 +603,10 @@ namespace ZendiKeySetup
                         Log("Responses API: " + models.CodexMessage + ".");
                     }
                     await ShowKeyStatusAsync(key);
+                    if (_installMissing.Checked)
+                    {
+                        await OfferInstallAsync(setupClaude, setupCodex);
+                    }
                 }
                 else
                 {
@@ -619,7 +641,7 @@ namespace ZendiKeySetup
             bool setupCodex = _setupCodex.Checked;
             if (!setupClaude && !setupCodex)
             {
-                MessageBox.Show(this, "Select Claude, Codex, or both first.", "Nothing selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, NothingSelectedMessage, "Nothing selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -689,8 +711,7 @@ namespace ZendiKeySetup
                 bool installSuccess = true;
                 if (_installMissing.Checked)
                 {
-                    InstallResult install = await InstallManager.InstallMissingAsync(Log, setupClaude, setupCodex);
-                    installSuccess = install.Success;
+                    installSuccess = await OfferInstallAsync(setupClaude, setupCodex);
                 }
 
                 Log("Writing encrypted credential and client configuration...");
@@ -722,12 +743,12 @@ namespace ZendiKeySetup
                     ? "Setup completed. Restart Claude Desktop and ChatGPT before using the new configuration."
                     : setupClaude
                         ? "Claude setup completed. Restart Claude Desktop before using the new configuration."
-                        : "Codex setup completed. Restart ChatGPT before using the new configuration.";
+                        : "Codex setup completed (" + codex + "). Open the ChatGPT app or run `codex` in a new terminal.";
                 MessageBox.Show(
                     this,
                     installSuccess
                         ? successMessage
-                        : "Configuration completed, but at least one optional installation failed. See Activity for details.",
+                        : "Configuration completed. One app still needs a click to finish installing - see Activity for details.",
                     "ZendiKey Setup",
                     MessageBoxButtons.OK,
                     installSuccess ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
@@ -792,16 +813,15 @@ namespace ZendiKeySetup
             bool installCodex = _setupCodex.Checked;
             if (!installClaude && !installCodex)
             {
-                MessageBox.Show(this, "Select Claude, Codex, or both first.", "Nothing selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, NothingSelectedMessage, "Nothing selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             SetBusy(true, "Installing missing clients...");
             try
             {
-                InstallResult result = await InstallManager.InstallMissingAsync(Log, installClaude, installCodex);
-                await RefreshStatusCoreAsync();
-                SetOverall(result.Success ? "Clients ready" : "Installation incomplete", result.Success ? Success : Warning);
+                bool ok = await OfferInstallAsync(installClaude, installCodex);
+                SetOverall(ok ? "Clients ready" : "Installation incomplete", ok ? Success : Warning);
             }
             catch (Exception ex)
             {
@@ -812,6 +832,59 @@ namespace ZendiKeySetup
             {
                 SetBusy(false, null);
             }
+        }
+
+        /// <summary>
+        /// Detects which selected clients are missing, tells the customer, lets them tick what to
+        /// install, installs it and refreshes the status. Returns false only when an install the
+        /// customer asked for did not finish (a skipped install is not a failure).
+        /// </summary>
+        private async Task<bool> OfferInstallAsync(bool wantClaude, bool wantCodex)
+        {
+            ClientStatus status = await Task.Run(delegate { return SystemDetector.Detect(); });
+            List<InstallChoice> missing = new List<InstallChoice>();
+            if (wantCodex && !status.CodexCli.Installed)
+            {
+                missing.Add(new InstallChoice("Codex CLI", "Codex CLI (terminal) - downloaded automatically, no Node.js needed"));
+            }
+            if (wantCodex && !status.ChatGptDesktop.Installed)
+            {
+                missing.Add(new InstallChoice("ChatGPT app", "ChatGPT app with Codex mode - from the Microsoft Store"));
+            }
+            if (wantClaude && !status.ClaudeCode.Installed)
+            {
+                missing.Add(new InstallChoice("Claude Code", "Claude Code (terminal)"));
+            }
+            if (wantClaude && !status.ClaudeDesktop.Installed)
+            {
+                missing.Add(new InstallChoice("Claude Desktop", "Claude Desktop app"));
+            }
+
+            if (missing.Count == 0)
+            {
+                Log("All selected apps are already installed.");
+                return true;
+            }
+
+            Log("Not installed yet: " + string.Join(", ", missing.Select(delegate(InstallChoice choice) { return choice.Name; }).ToArray()) + ".");
+            List<string> picked;
+            using (InstallChoiceDialog dialog = new InstallChoiceDialog(missing))
+            {
+                picked = dialog.ShowDialog(this) == DialogResult.OK ? dialog.Selected : new List<string>();
+            }
+            if (picked.Count == 0)
+            {
+                Log("Installation skipped by the user. You can install later with the Install selected button.");
+                return true;
+            }
+
+            InstallResult result = await InstallManager.InstallMissingAsync(
+                Log,
+                picked.Contains("Claude Code") || picked.Contains("Claude Desktop"),
+                picked.Contains("Codex CLI"),
+                picked.Contains("ChatGPT app"));
+            await RefreshStatusCoreAsync();
+            return result.Success;
         }
 
         private async Task RestoreLatestAsync()
@@ -884,7 +957,13 @@ namespace ZendiKeySetup
             bool codex = ConfigManager.IsCodexConfigured();
             bool desktop = ConfigManager.IsClaudeDesktopConfigured();
             bool credential = CredentialStore.IsReadable;
-            if (claude && codex && desktop && credential)
+            if (!ClaudeEnabled)
+            {
+                SetOverall(
+                    codex && credential ? "Codex configuration active" : "Configuration not applied",
+                    codex && credential ? Success : Neutral);
+            }
+            else if (claude && codex && desktop && credential)
             {
                 SetOverall("Gateway configuration active", Success);
             }
@@ -998,6 +1077,11 @@ namespace ZendiKeySetup
             _setupButton.Enabled = !_busy && hasTarget;
             _testButton.Enabled = !_busy && hasTarget;
             _installButton.Enabled = !_busy && hasTarget;
+        }
+
+        private static string NothingSelectedMessage
+        {
+            get { return ClaudeEnabled ? "Select Claude, Codex, or both first." : "Select Codex first."; }
         }
 
         private void SetKeyState(string text, Color color)
@@ -1150,6 +1234,87 @@ namespace ZendiKeySetup
             Primary,
             Neutral,
             Compact
+        }
+    }
+
+    internal sealed class InstallChoice
+    {
+        internal InstallChoice(string name, string description)
+        {
+            Name = name;
+            Description = description;
+        }
+
+        internal string Name { get; private set; }
+        internal string Description { get; private set; }
+    }
+
+    /// <summary>Small "these apps are missing, tick what to install" prompt.</summary>
+    internal sealed class InstallChoiceDialog : Form
+    {
+        private readonly List<CheckBox> _boxes = new List<CheckBox>();
+
+        internal InstallChoiceDialog(List<InstallChoice> choices)
+        {
+            Text = "Apps not installed yet";
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            BackColor = Color.White;
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            ClientSize = new Size(470, 112 + choices.Count * 30);
+
+            Label intro = new Label();
+            intro.AutoSize = false;
+            intro.Location = new Point(18, 14);
+            intro.Size = new Size(434, 34);
+            intro.Text = "These apps are not installed on this PC yet. Tick the ones you want to install now, then your ZendiKey will be configured for them.";
+            Controls.Add(intro);
+
+            int y = 56;
+            foreach (InstallChoice choice in choices)
+            {
+                CheckBox box = new CheckBox();
+                box.AutoSize = false;
+                box.Location = new Point(22, y);
+                box.Size = new Size(430, 24);
+                box.Checked = true;
+                box.Text = choice.Description;
+                box.Tag = choice.Name;
+                Controls.Add(box);
+                _boxes.Add(box);
+                y += 30;
+            }
+
+            Button install = new Button();
+            install.Text = "Install selected";
+            install.Size = new Size(130, 30);
+            install.Location = new Point(ClientSize.Width - 18 - 130, ClientSize.Height - 44);
+            install.DialogResult = DialogResult.OK;
+            Controls.Add(install);
+
+            Button skip = new Button();
+            skip.Text = "Skip for now";
+            skip.Size = new Size(110, 30);
+            skip.Location = new Point(install.Left - 10 - 110, ClientSize.Height - 44);
+            skip.DialogResult = DialogResult.Cancel;
+            Controls.Add(skip);
+
+            AcceptButton = install;
+            CancelButton = skip;
+        }
+
+        internal List<string> Selected
+        {
+            get
+            {
+                return _boxes
+                    .Where(delegate(CheckBox box) { return box.Checked; })
+                    .Select(delegate(CheckBox box) { return Convert.ToString(box.Tag); })
+                    .ToList();
+            }
         }
     }
 

@@ -5,10 +5,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -455,7 +457,7 @@ namespace ZendiKeySetup
             HttpClient client = new HttpClient();
             client.Timeout = TimeSpan.FromSeconds(45);
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key.Trim());
-            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.0");
+            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.2");
             return client;
         }
 
@@ -681,6 +683,11 @@ namespace ZendiKeySetup
             "gpt-5.5",
             "gpt-5.4",
             "gpt-5.4-mini",
+            // Gemini (Antigravity) keys: Codex talks to them through the same Responses endpoint.
+            "gemini-4-argon",
+            "gemini-3.8-flash",
+            "gemini-3-flash",
+            "gemini-2.5-flash",
             "claude-opus-5",
             "claude-sonnet-5"
         };
@@ -765,6 +772,13 @@ namespace ZendiKeySetup
             foreach (string model in available.Where(delegate(string value)
             {
                 return value.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase);
+            }))
+            {
+                AddIfAvailable(ordered, available, model);
+            }
+            foreach (string model in available.Where(delegate(string value)
+            {
+                return value.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
             }))
             {
                 AddIfAvailable(ordered, available, model);
@@ -2042,15 +2056,31 @@ namespace ZendiKeySetup
 
     internal static class InstallManager
     {
-        internal static async Task<InstallResult> InstallMissingAsync(Action<string> report)
-        {
-            return await InstallMissingAsync(report, true, true).ConfigureAwait(false);
-        }
+        // Microsoft Store listing of the ChatGPT app (package OpenAI.Codex) that hosts Codex mode.
+        internal const string ChatGptStoreId = "9PLM9XGG6VKS";
+        private const string CodexReleaseDownload = "https://github.com/openai/codex/releases/latest/download/";
+        private const string CodexReleaseApi = "https://api.github.com/repos/openai/codex/releases/latest";
+        private const int WingetAlreadyInstalled = unchecked((int)0x8A15002B);
+
+        internal static readonly string CodexPortableDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "Codex");
+        internal static readonly string CodexPortableExe = Path.Combine(CodexPortableDirectory, "codex.exe");
 
         internal static async Task<InstallResult> InstallMissingAsync(
             Action<string> report,
             bool installClaude,
             bool installCodex)
+        {
+            return await InstallMissingAsync(report, installClaude, installCodex, installCodex).ConfigureAwait(false);
+        }
+
+        internal static async Task<InstallResult> InstallMissingAsync(
+            Action<string> report,
+            bool installClaude,
+            bool installCodexCli,
+            bool installChatGptApp)
         {
             InstallResult summary = new InstallResult { Success = true };
             ClientStatus before = await Task.Run(delegate { return SystemDetector.Detect(); });
@@ -2068,72 +2098,9 @@ namespace ZendiKeySetup
                 AddMessage(summary, report, "Claude Code is already installed.");
             }
 
-            if (installCodex && !before.CodexCli.Installed)
+            if (installCodexCli)
             {
-                CommandResult npmCheck = await Task.Run(delegate
-                {
-                    return CommandRunner.Run("cmd.exe", "/d /s /c \"npm --version\"", 15000);
-                });
-                if (npmCheck.ExitCode != 0)
-                {
-                    CommandResult nodeInstall = await InstallWinget(
-                        "Node.js LTS",
-                        "--id OpenJS.NodeJS.LTS -e --silent --accept-source-agreements --accept-package-agreements",
-                        report,
-                        summary);
-                    if (nodeInstall.ExitCode == 0)
-                    {
-                        RefreshProcessPath();
-                        npmCheck = await Task.Run(delegate
-                        {
-                            return CommandRunner.Run("cmd.exe", "/d /s /c \"npm --version\"", 15000);
-                        });
-                    }
-                }
-
-                if (npmCheck.ExitCode != 0)
-                {
-                    summary.Success = false;
-                    AddMessage(summary, report, "Codex CLI skipped because npm is unavailable after Node.js setup.");
-                }
-                else
-                {
-                    AddMessage(summary, report, "Installing Codex CLI...");
-                    CommandResult codexInstall = await Task.Run(delegate
-                    {
-                        return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
-                    });
-                    RecordResult("Codex CLI", codexInstall, report, summary);
-                }
-            }
-            else if (installCodex)
-            {
-                // Older Codex builds do not know the newest GPT models; refresh to latest so the
-                // bundled catalog and the Responses client match what the gateway offers.
-                CommandResult npmCheck = await Task.Run(delegate
-                {
-                    return CommandRunner.Run("cmd.exe", "/d /s /c \"npm --version\"", 15000);
-                });
-                if (npmCheck.ExitCode == 0)
-                {
-                    AddMessage(summary, report, "Updating Codex CLI to the latest version...");
-                    CommandResult codexUpdate = await Task.Run(delegate
-                    {
-                        return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
-                    });
-                    if (codexUpdate.ExitCode == 0)
-                    {
-                        AddMessage(summary, report, "Codex CLI is up to date.");
-                    }
-                    else
-                    {
-                        AddMessage(summary, report, "Codex CLI update skipped: " + LastUsefulLine(codexUpdate.Output));
-                    }
-                }
-                else
-                {
-                    AddMessage(summary, report, "Codex CLI is already installed.");
-                }
+                await EnsureCodexCliAsync(before.CodexCli, report, summary);
             }
 
             if (installClaude && !before.ClaudeDesktop.Installed)
@@ -2149,20 +2116,316 @@ namespace ZendiKeySetup
                 AddMessage(summary, report, "Claude Desktop is already installed.");
             }
 
-            if (installCodex && !before.ChatGptDesktop.Installed)
+            if (installChatGptApp)
             {
-                await InstallWinget(
-                    "ChatGPT Desktop",
-                    "--id 9PLM9XGG6VKS -e -s msstore --silent --accept-source-agreements --accept-package-agreements",
-                    report,
-                    summary);
-            }
-            else if (installCodex)
-            {
-                AddMessage(summary, report, "ChatGPT Desktop is already installed.");
+                await EnsureChatGptAppAsync(before.ChatGptDesktop, report, summary);
             }
 
             return summary;
+        }
+
+        /// <summary>
+        /// Codex CLI without any prerequisite: npm when the PC already has Node.js, otherwise the
+        /// standalone Windows binary from the official GitHub release (no Node.js, no admin rights).
+        /// </summary>
+        private static async Task EnsureCodexCliAsync(DetectionItem current, Action<string> report, InstallResult summary)
+        {
+            bool npm = await HasCommandAsync("npm --version");
+
+            if (!current.Installed)
+            {
+                if (npm)
+                {
+                    AddMessage(summary, report, "Installing Codex CLI with npm...");
+                    CommandResult npmInstall = await Task.Run(delegate
+                    {
+                        return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
+                    });
+                    RefreshProcessPath();
+                    if (npmInstall.ExitCode == 0 && await HasCommandAsync("codex --version"))
+                    {
+                        AddMessage(summary, report, "Codex CLI installed (" + await CodexVersionAsync() + ").");
+                        return;
+                    }
+                    AddMessage(summary, report, "npm install did not work (" + LastUsefulLine(npmInstall.Output) + "); using the standalone build instead.");
+                }
+
+                await InstallCodexPortableAsync(report, summary);
+                return;
+            }
+
+            if (await IsPortableCodexAsync())
+            {
+                await UpdateCodexPortableAsync(report, summary);
+                return;
+            }
+
+            if (npm)
+            {
+                // Older Codex builds do not know the newest models; refresh to latest so the
+                // bundled catalog and the Responses client match what the gateway offers.
+                AddMessage(summary, report, "Updating Codex CLI to the latest version...");
+                CommandResult codexUpdate = await Task.Run(delegate
+                {
+                    return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
+                });
+                AddMessage(
+                    summary,
+                    report,
+                    codexUpdate.ExitCode == 0
+                        ? "Codex CLI is up to date (" + await CodexVersionAsync() + ")."
+                        : "Codex CLI update skipped: " + LastUsefulLine(codexUpdate.Output));
+                return;
+            }
+
+            AddMessage(summary, report, "Codex CLI is already installed (" + current.DisplayValue + ").");
+        }
+
+        /// <summary>
+        /// Downloads the standalone Codex CLI for this CPU into %LocalAppData%\Programs\Codex and
+        /// puts that folder on the user PATH. Returns true when `codex --version` works afterwards.
+        /// </summary>
+        internal static async Task<bool> InstallCodexPortableAsync(Action<string> report, InstallResult summary)
+        {
+            string asset = IsArm64() ? "codex-aarch64-pc-windows-msvc.exe.zip" : "codex-x86_64-pc-windows-msvc.exe.zip";
+            string archive = Path.Combine(Path.GetTempPath(), "zendikey-" + asset);
+            string pending = CodexPortableExe + ".new";
+
+            try
+            {
+                AddMessage(summary, report, "Downloading Codex CLI (standalone, no Node.js needed)...");
+                await DownloadFileAsync(CodexReleaseDownload + asset, archive, report);
+
+                Directory.CreateDirectory(CodexPortableDirectory);
+                AddMessage(summary, report, "Unpacking Codex CLI...");
+                string mainName = asset.Substring(0, asset.Length - ".zip".Length);
+                await Task.Run(delegate
+                {
+                    // The archive holds the CLI itself (codex-<arch>-pc-windows-msvc.exe) plus the
+                    // helper binaries it spawns (command runner, sandbox setup, ripgrep, voice).
+                    // Everything is unpacked next to codex.exe, mirroring the npm package layout.
+                    bool found = false;
+                    using (ZipArchive zip = ZipFile.OpenRead(archive))
+                    {
+                        foreach (ZipArchiveEntry entry in zip.Entries)
+                        {
+                            if (string.IsNullOrEmpty(entry.Name))
+                            {
+                                continue;
+                            }
+                            string relative = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
+                            if (relative.Contains(".." + Path.DirectorySeparatorChar) || Path.IsPathRooted(relative))
+                            {
+                                continue;
+                            }
+                            string target;
+                            if (string.Equals(entry.FullName, mainName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                target = pending;
+                                found = true;
+                            }
+                            else
+                            {
+                                target = Path.Combine(CodexPortableDirectory, relative);
+                                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                            }
+                            entry.ExtractToFile(target, true);
+                        }
+                    }
+                    if (!found)
+                    {
+                        throw new InvalidOperationException("The Codex download did not contain " + mainName + ".");
+                    }
+                });
+
+                try
+                {
+                    File.Copy(pending, CodexPortableExe, true);
+                }
+                catch (IOException)
+                {
+                    throw new InvalidOperationException("codex.exe is in use. Close Codex / ChatGPT and run the setup again.");
+                }
+
+                AddUserPath(CodexPortableDirectory);
+                RefreshProcessPath();
+
+                CommandResult probe = await Task.Run(delegate
+                {
+                    return CommandRunner.Run(CodexPortableExe, "--version", 30000);
+                });
+                if (probe.ExitCode != 0)
+                {
+                    throw new InvalidOperationException("codex.exe was unpacked but does not start: " + LastUsefulLine(probe.Output));
+                }
+
+                AddMessage(summary, report, "Codex CLI installed (" + FirstLine(probe.Output) + ") in " + CodexPortableDirectory + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                summary.Success = false;
+                AddMessage(summary, report, "Codex CLI failed: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                TryDelete(pending);
+                TryDelete(archive);
+            }
+        }
+
+        private static async Task UpdateCodexPortableAsync(Action<string> report, InstallResult summary)
+        {
+            string installed = await CodexVersionAsync();
+            string latest = await LatestCodexVersionAsync();
+            if (string.IsNullOrWhiteSpace(latest))
+            {
+                AddMessage(summary, report, "Codex CLI is installed (" + installed + "); update check skipped.");
+                return;
+            }
+            if (installed.IndexOf(latest, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                AddMessage(summary, report, "Codex CLI is up to date (" + installed + ").");
+                return;
+            }
+
+            AddMessage(summary, report, "Updating Codex CLI " + installed + " -> " + latest + "...");
+            await InstallCodexPortableAsync(report, summary);
+        }
+
+        private static async Task<bool> IsPortableCodexAsync()
+        {
+            if (!File.Exists(CodexPortableExe))
+            {
+                return false;
+            }
+            CommandResult where = await Task.Run(delegate
+            {
+                return CommandRunner.Run("cmd.exe", "/d /s /c \"where codex\"", 15000);
+            });
+            string first = (where.Output ?? string.Empty).Replace("\r", string.Empty).Split('\n')[0].Trim();
+            return string.Equals(first, CodexPortableExe, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static async Task<string> LatestCodexVersionAsync()
+        {
+            try
+            {
+                using (HttpClient client = CreateHttpClient(TimeSpan.FromSeconds(30)))
+                {
+                    string body = await client.GetStringAsync(CodexReleaseApi).ConfigureAwait(false);
+                    Dictionary<string, object> root = Json.DeserializeDictionary(body);
+                    object tag;
+                    if (!root.TryGetValue("tag_name", out tag) || tag == null)
+                    {
+                        return null;
+                    }
+                    Match match = Regex.Match(Convert.ToString(tag, CultureInfo.InvariantCulture), @"\d+(\.\d+)+");
+                    return match.Success ? match.Value : null;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static async Task<string> CodexVersionAsync()
+        {
+            CommandResult result = await Task.Run(delegate
+            {
+                return File.Exists(CodexPortableExe)
+                    ? CommandRunner.Run(CodexPortableExe, "--version", 15000)
+                    : CommandRunner.Run("cmd.exe", "/d /s /c \"codex --version\"", 15000);
+            });
+            string line = FirstLine(result.Output);
+            return string.IsNullOrWhiteSpace(line) ? "unknown version" : line;
+        }
+
+        private static string FirstLine(string value)
+        {
+            return (value ?? string.Empty).Replace("\r", string.Empty).Split('\n')[0].Trim();
+        }
+
+        /// <summary>
+        /// The ChatGPT app (Codex mode) only ships through the Microsoft Store. winget can install
+        /// it silently when the Store source works; otherwise the Store page is opened so the
+        /// customer only has to press Install.
+        /// </summary>
+        private static async Task EnsureChatGptAppAsync(DetectionItem current, Action<string> report, InstallResult summary)
+        {
+            if (current.Installed)
+            {
+                AddMessage(summary, report, "ChatGPT app is already installed (" + current.DisplayValue + ").");
+                return;
+            }
+
+            string winget = FindWinget();
+            if (winget != null)
+            {
+                AddMessage(summary, report, "Installing the ChatGPT app from the Microsoft Store...");
+                CommandResult result = await Task.Run(delegate
+                {
+                    return CommandRunner.Run(
+                        winget,
+                        "install --id " + ChatGptStoreId + " -e -s msstore --silent --accept-source-agreements --accept-package-agreements --disable-interactivity",
+                        1200000);
+                });
+                if (result.ExitCode == 0 || result.ExitCode == WingetAlreadyInstalled)
+                {
+                    DetectionItem after = await Task.Run(delegate { return SystemDetector.Detect().ChatGptDesktop; });
+                    if (after.Installed)
+                    {
+                        AddMessage(summary, report, "ChatGPT app installed (" + after.DisplayValue + ").");
+                        return;
+                    }
+                }
+                AddMessage(summary, report, "winget could not install the ChatGPT app: " + LastUsefulLine(result.Output));
+            }
+            else
+            {
+                AddMessage(summary, report, "winget is not available on this PC.");
+            }
+
+            if (OpenStorePage(ChatGptStoreId))
+            {
+                summary.Success = false;
+                AddMessage(summary, report, "Microsoft Store opened on the ChatGPT app: press Install there, then click Refresh status.");
+            }
+            else
+            {
+                summary.Success = false;
+                AddMessage(summary, report, "Install the ChatGPT app from the Microsoft Store (search \"ChatGPT\" by OpenAI), then click Refresh status.");
+            }
+        }
+
+        private static string FindWinget()
+        {
+            CommandResult probe = CommandRunner.Run("cmd.exe", "/d /s /c \"winget --version\"", 20000);
+            if (probe.ExitCode == 0)
+            {
+                return "winget.exe";
+            }
+            string alias = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Microsoft",
+                "WindowsApps",
+                "winget.exe");
+            return File.Exists(alias) ? alias : null;
+        }
+
+        private static bool OpenStorePage(string productId)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("ms-windows-store://pdp/?ProductId=" + productId) { UseShellExecute = true });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static async Task<CommandResult> InstallWinget(
@@ -2171,16 +2434,120 @@ namespace ZendiKeySetup
             Action<string> report,
             InstallResult summary)
         {
+            string winget = FindWinget() ?? "winget.exe";
             AddMessage(summary, report, "Installing " + name + "...");
             CommandResult result = await Task.Run(delegate
             {
                 return CommandRunner.Run(
-                    "winget.exe",
+                    winget,
                     "install " + installArguments + " --disable-interactivity",
                     1200000);
             });
+            if (result.ExitCode == WingetAlreadyInstalled)
+            {
+                result.ExitCode = 0;
+            }
             RecordResult(name, result, report, summary);
             return result;
+        }
+
+        private static async Task DownloadFileAsync(string url, string target, Action<string> report)
+        {
+            using (HttpClient client = CreateHttpClient(TimeSpan.FromMinutes(30)))
+            using (HttpResponseMessage response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+            {
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException("Download failed: HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture));
+                }
+
+                long total = response.Content.Headers.ContentLength ?? -1;
+                long done = 0;
+                long nextReport = 20L * 1024 * 1024;
+                byte[] buffer = new byte[1024 * 1024];
+                using (Stream input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                using (FileStream output = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, buffer.Length, true))
+                {
+                    int read;
+                    while ((read = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+                    {
+                        await output.WriteAsync(buffer, 0, read).ConfigureAwait(false);
+                        done += read;
+                        if (report != null && done >= nextReport)
+                        {
+                            nextReport += 20L * 1024 * 1024;
+                            report("Downloaded " + (done / 1048576).ToString(CultureInfo.InvariantCulture) + " MB" +
+                                   (total > 0 ? " of " + (total / 1048576).ToString(CultureInfo.InvariantCulture) + " MB" : string.Empty) + "...");
+                        }
+                    }
+                }
+            }
+        }
+
+        private static HttpClient CreateHttpClient(TimeSpan timeout)
+        {
+            HttpClient client = new HttpClient();
+            client.Timeout = timeout;
+            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.2");
+            return client;
+        }
+
+        private static bool IsArm64()
+        {
+            string arch = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432") ??
+                          Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") ?? string.Empty;
+            return arch.IndexOf("ARM64", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static async Task<bool> HasCommandAsync(string commandLine)
+        {
+            CommandResult result = await Task.Run(delegate
+            {
+                return CommandRunner.Run("cmd.exe", "/d /s /c \"" + commandLine + "\"", 15000);
+            });
+            return result.ExitCode == 0;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr SendMessageTimeout(
+            IntPtr hWnd,
+            uint msg,
+            UIntPtr wParam,
+            string lParam,
+            uint flags,
+            uint timeout,
+            out UIntPtr result);
+
+        /// <summary>Appends a folder to the current user's PATH (HKCU\Environment) if it is missing.</summary>
+        private static void AddUserPath(string directory)
+        {
+            using (RegistryKey env = Registry.CurrentUser.OpenSubKey("Environment", true))
+            {
+                if (env == null)
+                {
+                    return;
+                }
+                string current = Convert.ToString(env.GetValue("Path", string.Empty, RegistryValueOptions.DoNotExpandEnvironmentNames));
+                string[] parts = current.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Any(delegate(string part)
+                {
+                    return string.Equals(part.Trim().TrimEnd('\\'), directory.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+                }))
+                {
+                    return;
+                }
+                string updated = string.IsNullOrWhiteSpace(current) ? directory : current.TrimEnd(';') + ";" + directory;
+                env.SetValue("Path", updated, RegistryValueKind.ExpandString);
+            }
+
+            try
+            {
+                UIntPtr ignored;
+                SendMessageTimeout(new IntPtr(0xFFFF), 0x001A, UIntPtr.Zero, "Environment", 0x0002, 5000, out ignored);
+            }
+            catch
+            {
+            }
         }
 
         private static void RefreshProcessPath()
@@ -2190,7 +2557,7 @@ namespace ZendiKeySetup
             string user = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User);
             string combined = string.Join(
                 ";",
-                new[] { current, machine, user }
+                new[] { current, machine, user, CodexPortableDirectory }
                     .Where(delegate(string value) { return !string.IsNullOrWhiteSpace(value); })
                     .ToArray());
             Environment.SetEnvironmentVariable("Path", combined, EnvironmentVariableTarget.Process);
@@ -2220,6 +2587,20 @@ namespace ZendiKeySetup
             if (report != null)
             {
                 report(message);
+            }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
             }
         }
 
@@ -2339,6 +2720,12 @@ namespace ZendiKeySetup
             string[] models = { "other", "claude-sonnet-4.5", "gpt-5.6-sol" };
             Assert(ModelSelector.PickClaude(models) == "claude-sonnet-4.5", "Claude model selection");
             Assert(ModelSelector.PickCodex(models) == "gpt-5.6-sol", "Codex model selection");
+
+            // Gemini (Antigravity) key: only gemini models are exposed, argon must win.
+            string[] gemini = { "gemini-2.5-flash-lite", "gemini-3-flash", "gemini-4-argon", "gemini-3-pro-image" };
+            Assert(ModelSelector.PickCodex(gemini) == "gemini-4-argon", "Gemini key picks argon for Codex");
+            List<string> ordered = ModelSelector.CodexCandidates(new[] { "other", "gemini-3-flash", "gpt-5.6-sol", "gemini-4-argon" }, null);
+            Assert(ordered[0] == "gpt-5.6-sol" && ordered[1] == "gemini-4-argon" && ordered[2] == "gemini-3-flash" && ordered[3] == "other", "Codex candidates: gpt, gemini, rest");
         }
 
         private static void TestClaudeMerge()
