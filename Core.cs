@@ -21,8 +21,8 @@ namespace ZendiKeySetup
 {
     internal static class AppPaths
     {
-        internal const string BaseUrl = "https://zendigikey.shop/v1";
-        internal const string ClaudeCodeBaseUrl = "https://zendigikey.shop";
+        internal const string BaseUrl = "https://api.zendigikey.shop/v1";
+        internal const string ClaudeCodeBaseUrl = "https://api.zendigikey.shop";
         internal const string ProviderId = "zendigikey";
 
         internal static readonly string Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

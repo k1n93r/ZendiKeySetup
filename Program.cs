@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
 [assembly: AssemblyCopyright("Copyright 2026")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
 
 namespace ZendiKeySetup
 {
@@ -217,7 +217,7 @@ namespace ZendiKeySetup
                 Stdout.WriteLine("Package: " + claimed.Summary + (claimed.Recovered ? " (recovered)" : string.Empty));
             }
 
-            Stdout.WriteLine("Checking https://zendigikey.shop/v1 ...");
+            Stdout.WriteLine("Checking https://api.zendigikey.shop/v1 ...");
             GatewayCheckResult check = await GatewayClient.CheckAsync(key, null, null, false);
             if (!check.ModelsOk)
             {
