@@ -8,15 +8,15 @@ Cài đặt ZendiKey cho Codex CLI và app ChatGPT (Codex mode) trên Windows. D
 
 1. [Tải ZendiKeySetup.exe](https://github.com/k1n93r/ZendiKeySetup/releases/latest/download/ZendiKeySetup.exe).
 2. Mở file vừa tải và dán **mã ZEN-XXX-XXX-XXX** (hoặc API key `sk-...`).
-3. Bấm **Test key**: ứng dụng kiểm tra key, báo app nào chưa cài (Codex CLI, app ChatGPT) và cho bạn chọn cài cái nào.
-4. Bấm **Set up selected** và chờ thông báo hoàn tất.
-5. Mở app ChatGPT (Codex mode) hoặc gõ `codex` trong terminal mới để dùng.
+3. Bấm **Test key**: ứng dụng kiểm tra key, báo app nào chưa cài (Codex CLI, app ChatGPT, Claude Code, Claude Desktop) và cho bạn chọn cài cái nào.
+4. Tick **Codex** / **Claude** tùy key, bấm **Set up selected** và chờ thông báo hoàn tất.
+5. Mở app ChatGPT (Codex mode), gõ `codex` hoặc `claude` trong terminal mới, hoặc mở Claude Desktop để dùng.
 
-Ứng dụng tự đổi mã lấy key, kiểm tra key, chọn model tốt nhất của key (GPT hoặc Gemini), cài thành phần còn thiếu và hiển thị gói / số dư / hạn dùng của key.
+Ứng dụng tự đổi mã lấy key, kiểm tra key, chọn model tốt nhất của key (GPT, Gemini hoặc Claude), cài thành phần còn thiếu và hiển thị gói / số dư / hạn dùng của key.
 
 - **Codex CLI** được tải thẳng từ GitHub (bản standalone, không cần Node.js, không cần quyền admin) vào `%LocalAppData%\Programs\Codex`. Máy đã có npm thì cài qua npm.
 - **App ChatGPT** cài qua Microsoft Store (winget). Nếu winget lỗi, ứng dụng tự mở trang Store đúng app, bạn chỉ cần bấm Install.
-- Claude Code / Claude Desktop tạm ẩn (chưa bán).
+- **Claude Code** (`~/.claude/settings.json`) và **Claude Desktop** (cấu hình gateway) trỏ về `https://api.zendigikey.shop`; key được giữ trong credential helper của ứng dụng, không ghi thẳng vào file. Trong Claude Code, `/model opus`, `sonnet`, `haiku` lần lượt là claude-opus-5.5, claude-sonnet-5.5, claude-haiku-4.5 (theo key).
 - Nút **Reset to default** gỡ toàn bộ cấu hình ZendiKey khỏi Codex CLI / app ChatGPT (app vẫn còn, đăng nhập tài khoản riêng bình thường). **Restore latest** đưa cấu hình ZendiKey trở lại.
 
 ## Mở bằng link

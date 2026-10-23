@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
 [assembly: AssemblyCopyright("Copyright 2026")]
-[assembly: AssemblyVersion("1.2.1.0")]
-[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyVersion("1.2.2.0")]
+[assembly: AssemblyFileVersion("1.2.2.0")]
 
 namespace ZendiKeySetup
 {
@@ -45,10 +45,11 @@ namespace ZendiKeySetup
                     return CommandLineStatus();
                 }
 
-                // Claude setup is paused: the CLI configures Codex only unless --claude-only is
-                // passed explicitly (--codex-only is kept for older scripts).
+                // v1.2.2: Claude is back (Claude Code + Claude Desktop via api.zendigikey.shop).
+                // Default = configure both; --codex-only / --claude-only narrow it.
                 bool claudeOnly = HasArgument(args, "--claude-only");
-                bool configureClaude = claudeOnly;
+                bool codexOnly = HasArgument(args, "--codex-only");
+                bool configureClaude = !codexOnly;
                 bool configureCodex = !claudeOnly;
 
                 if (HasArgument(args, "--install-codex-portable"))

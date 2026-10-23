@@ -24,7 +24,7 @@ namespace ZendiKeySetup
 
         // Claude Code / Claude Desktop setup is paused for customers (19/10/2026). Flip to true to
         // show the Claude controls again; all the Claude code paths are kept intact.
-        private const bool ClaudeEnabled = false;
+        private const bool ClaudeEnabled = true; // v1.2.2: Claude Code + Claude Desktop via api.zendigikey.shop
 
         private TextBox _keyBox;
         private CheckBox _showKey;

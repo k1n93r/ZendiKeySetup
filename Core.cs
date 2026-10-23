@@ -659,11 +659,14 @@ namespace ZendiKeySetup
         private static readonly string[] ClaudePreferences =
         {
             "claude-opus-5.5",
+            "claude-sonnet-5.5",
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5",
             "claude-opus-4.8",
             "claude-opus-4.7",
+            "claude-opus-4.6",
+            "claude-sonnet-4.6",
             "claude-haiku-4.5",
             "claude-sonnet-4.5",
             "claude-sonnet-4-5",
@@ -688,9 +691,45 @@ namespace ZendiKeySetup
             "gemini-3.8-flash",
             "gemini-3-flash",
             "gemini-2.5-flash",
+            // Claude (Kiro channel) in the gateway's price order: Opus 5.5 > Sonnet 5.5 > Opus 5 > Sonnet 5 > 4.x
+            "claude-opus-5.5",
+            "claude-sonnet-5.5",
             "claude-opus-5",
-            "claude-sonnet-5"
+            "claude-sonnet-5",
+            "claude-opus-4.8",
+            "claude-sonnet-4.6"
         };
+
+        /// <summary>First gateway model of a Claude family ("opus", "sonnet", "haiku", "fable")
+        /// in preference order, or null when the key exposes none.</summary>
+        internal static string PickClaudeFamily(IEnumerable<string> models, string family)
+        {
+            List<string> list = models == null ? new List<string>() : models.ToList();
+            string marker = "-" + family + "-";
+            foreach (string preference in ClaudePreferences)
+            {
+                if (preference.IndexOf(marker, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+                foreach (string candidate in list)
+                {
+                    if (string.Equals(candidate, preference, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+            foreach (string candidate in list)
+            {
+                if (candidate != null && candidate.StartsWith("claude-", StringComparison.OrdinalIgnoreCase) &&
+                    candidate.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return candidate;
+                }
+            }
+            return null;
+        }
 
         internal static string PickClaude(IEnumerable<string> models)
         {
@@ -1241,10 +1280,17 @@ namespace ZendiKeySetup
             env["ANTHROPIC_BASE_URL"] = AppPaths.ClaudeCodeBaseUrl;
             env.Remove("ANTHROPIC_AUTH_TOKEN");
             env.Remove("ANTHROPIC_API_KEY");
-            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model;
-            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model;
-            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model;
-            env["ANTHROPIC_DEFAULT_FABLE_MODEL"] = model;
+            // Map Claude Code's tier aliases (opus/sonnet/haiku/fable) onto the gateway's
+            // models so "/model opus" or "/model haiku" pick a real gateway model instead of
+            // all tiers collapsing onto the selected one.
+            string opus = ModelSelector.PickClaudeFamily(availableModels, "opus") ?? model;
+            string sonnet = ModelSelector.PickClaudeFamily(availableModels, "sonnet") ?? model;
+            string haiku = ModelSelector.PickClaudeFamily(availableModels, "haiku") ?? sonnet;
+            string fable = ModelSelector.PickClaudeFamily(availableModels, "fable") ?? opus;
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = opus;
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = sonnet;
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku;
+            env["ANTHROPIC_DEFAULT_FABLE_MODEL"] = fable;
 
             settings["env"] = env;
             settings["model"] = model;
@@ -2879,6 +2925,16 @@ namespace ZendiKeySetup
             Assert(!env.ContainsKey("ANTHROPIC_AUTH_TOKEN"), "Claude plaintext token removed");
             Assert(Convert.ToString(env["ANTHROPIC_BASE_URL"]) == AppPaths.ClaudeCodeBaseUrl, "Claude base URL");
             Assert(Convert.ToString(root["apiKeyHelper"]).Contains("--credential"), "Claude credential helper");
+            Assert(Convert.ToString(env["ANTHROPIC_DEFAULT_OPUS_MODEL"]) == "claude-test", "Claude tiers fall back to selected model");
+
+            string[] gateway = { "gpt-6.1-sol", "claude-haiku-4.5", "claude-sonnet-4.6", "claude-sonnet-5.5", "claude-opus-4.8", "claude-opus-5.5" };
+            string tiered = ConfigManager.MergeClaudeJson(source, @"C:\Test App\helper.exe", "claude-opus-5.5", gateway);
+            Dictionary<string, object> tieredEnv = Json.AsDictionary(Json.DeserializeDictionary(tiered)["env"]);
+            Assert(Convert.ToString(tieredEnv["ANTHROPIC_DEFAULT_OPUS_MODEL"]) == "claude-opus-5.5", "Claude opus tier");
+            Assert(Convert.ToString(tieredEnv["ANTHROPIC_DEFAULT_SONNET_MODEL"]) == "claude-sonnet-5.5", "Claude sonnet tier");
+            Assert(Convert.ToString(tieredEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"]) == "claude-haiku-4.5", "Claude haiku tier");
+            Assert(Convert.ToString(tieredEnv["ANTHROPIC_DEFAULT_FABLE_MODEL"]) == "claude-opus-5.5", "Claude fable tier falls back to opus");
+            Assert(ModelSelector.PickClaude(gateway) == "claude-opus-5.5", "Claude default pick is Opus 5.5");
         }
 
         private static void TestCodexMerge()
