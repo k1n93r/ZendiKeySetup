@@ -9,12 +9,13 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("ZendiKey Setup")]
-[assembly: AssemblyDescription("Configure Codex (GPT and Gemini keys) for zendigikey.shop")]
+[assembly: AssemblyDescription("Configure Claude and Codex clients for zendigikey.shop")]
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
-[assembly: AssemblyCopyright("Copyright 2026")]
-[assembly: AssemblyVersion("1.2.2.0")]
-[assembly: AssemblyFileVersion("1.2.2.0")]
+[assembly: AssemblyCopyright("Copyright 2026 ZendiKey")]
+[assembly: AssemblyVersion("1.2.3.0")]
+[assembly: AssemblyFileVersion("1.2.3.0")]
+[assembly: AssemblyInformationalVersion("1.2.3")]
 
 namespace ZendiKeySetup
 {
@@ -96,17 +97,10 @@ namespace ZendiKeySetup
                 {
                 }
 
-                // Keep a stable copy in %LocalAppData% and point zendikey:// links at it so
-                // Telegram/web "open in app" links keep working after the download is deleted.
+                // Protocol registration and %LocalAppData% copy happen inside ConfigManager.Apply
+                // when the user explicitly applies a configuration, avoiding startup self-copy
+                // or registry modification before user interaction.
                 string initialInput = null;
-                try
-                {
-                    string installedExe = InstalledApp.EnsureCurrentCopy();
-                    ProtocolRegistrar.Register(installedExe);
-                }
-                catch
-                {
-                }
                 int i;
                 for (i = 0; i < args.Length; i++)
                 {

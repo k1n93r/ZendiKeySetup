@@ -928,6 +928,13 @@ namespace ZendiKeySetup
             }
 
             string installedExe = InstalledApp.EnsureCurrentCopy();
+            try
+            {
+                ProtocolRegistrar.Register(installedExe);
+            }
+            catch
+            {
+            }
             string backup = BackupManager.Create();
 
             try
@@ -1326,9 +1333,15 @@ namespace ZendiKeySetup
 
         private static string WriteCodexModelCatalog(string selectedModel, IEnumerable<string> availableModels)
         {
+            string codexExe = SystemDetector.FindNativeCodexExe();
+            if (string.IsNullOrWhiteSpace(codexExe) || !File.Exists(codexExe))
+            {
+                return File.Exists(AppPaths.CodexModelCatalog) ? AppPaths.CodexModelCatalog : null;
+            }
+
             CommandResult result = CommandRunner.Run(
-                "cmd.exe",
-                "/d /s /c \"codex debug models --bundled\"",
+                codexExe,
+                "debug models --bundled",
                 30000);
             if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.Output))
             {
@@ -2169,54 +2182,403 @@ namespace ZendiKeySetup
 
     internal static class SystemDetector
     {
+        private static readonly string[] AppxRegistryRoots =
+        {
+            @"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages",
+            @"Software\Classes\ActivatableClasses\Package"
+        };
+
         internal static ClientStatus Detect()
         {
             return new ClientStatus
             {
-                ClaudeCode = DetectCommand("claude", "--version"),
-                CodexCli = DetectCommand("codex", "--version"),
-                ClaudeDesktop = DetectAppx("Claude", "Claude Desktop"),
-                ChatGptDesktop = DetectAppx("ChatGPT|OpenAI\\.(?:Codex|Chat)", "ChatGPT Desktop")
+                ClaudeCode = DetectClaudeCode(),
+                CodexCli = DetectCodexCli(),
+                ClaudeDesktop = DetectClaudeDesktop(),
+                ChatGptDesktop = DetectAppx(@"ChatGPT|OpenAI\.(?:Codex|Chat)", "ChatGPT Desktop")
             };
         }
 
-        private static DetectionItem DetectCommand(string command, string arguments)
+        internal static DetectionItem DetectClaudeCode()
         {
-            CommandResult result = CommandRunner.Run(
-                "cmd.exe",
-                "/d /s /c \"" + command + " " + arguments + "\"",
-                15000);
-            if (result.ExitCode != 0)
+            string npmVersion = ReadNpmGlobalVersion("@anthropic-ai", "claude-code", "claude");
+            if (!string.IsNullOrWhiteSpace(npmVersion))
             {
-                return new DetectionItem { Installed = false, DisplayValue = "Not installed" };
+                return new DetectionItem
+                {
+                    Installed = true,
+                    DisplayValue = npmVersion + " (Claude Code)"
+                };
             }
 
-            string line = FirstLine(result.Output);
-            return new DetectionItem
+            string exe = FindClaudeExe();
+            if (!string.IsNullOrWhiteSpace(exe) && File.Exists(exe))
             {
-                Installed = true,
-                DisplayValue = string.IsNullOrWhiteSpace(line) ? "Installed" : line
-            };
+                string version = ReadFileProductVersion(exe);
+                if (!string.IsNullOrWhiteSpace(version))
+                {
+                    return new DetectionItem { Installed = true, DisplayValue = version + " (Claude Code)" };
+                }
+
+                CommandResult probe = CommandRunner.Run(exe, "--version", 10000);
+                if (probe.ExitCode == 0)
+                {
+                    string line = FirstLine(probe.Output);
+                    return new DetectionItem
+                    {
+                        Installed = true,
+                        DisplayValue = string.IsNullOrWhiteSpace(line) ? "Installed" : line
+                    };
+                }
+            }
+
+            return new DetectionItem { Installed = false, DisplayValue = "Not installed" };
         }
 
-        private static DetectionItem DetectAppx(string pattern, string displayName)
+        internal static DetectionItem DetectCodexCli()
         {
-            string script =
-                "$p = Get-AppxPackage | Where-Object { $_.Name -match '" + pattern.Replace("'", "''") +
-                "' -or $_.PackageFullName -match '" + pattern.Replace("'", "''") +
-                "' } | Select-Object -First 1; if ($p) { [Console]::Write($p.Version.ToString()) } else { exit 3 }";
-            CommandResult result = CommandRunner.RunPowerShell(script, 30000);
-            if (result.ExitCode != 0)
+            bool portablePreferred = IsPortableCodexPreferred();
+            if (!portablePreferred)
             {
-                return new DetectionItem { Installed = false, DisplayValue = "Not installed" };
+                string npmVersion = ReadNpmGlobalVersion("@openai", "codex", "codex");
+                if (!string.IsNullOrWhiteSpace(npmVersion))
+                {
+                    return new DetectionItem
+                    {
+                        Installed = true,
+                        DisplayValue = "codex-cli " + npmVersion
+                    };
+                }
             }
 
-            string version = FirstLine(result.Output);
-            return new DetectionItem
+            string exe = FindNativeCodexExe();
+            if (!string.IsNullOrWhiteSpace(exe) && File.Exists(exe))
             {
-                Installed = true,
-                DisplayValue = string.IsNullOrWhiteSpace(version) ? displayName : "v" + version
+                string version = ReadFileProductVersion(exe);
+                if (!string.IsNullOrWhiteSpace(version))
+                {
+                    return new DetectionItem { Installed = true, DisplayValue = "codex-cli " + version };
+                }
+
+                CommandResult probe = CommandRunner.Run(exe, "--version", 10000);
+                if (probe.ExitCode == 0)
+                {
+                    string line = FirstLine(probe.Output);
+                    return new DetectionItem
+                    {
+                        Installed = true,
+                        DisplayValue = string.IsNullOrWhiteSpace(line) ? "Installed" : line
+                    };
+                }
+            }
+
+            return new DetectionItem { Installed = false, DisplayValue = "Not installed" };
+        }
+
+        internal static bool IsPortableCodexPreferred()
+        {
+            if (!File.Exists(InstallManager.CodexPortableExe))
+            {
+                return false;
+            }
+
+            string first = FindFirstOnPath(new[] { "codex.exe", "codex.cmd" });
+            if (string.IsNullOrWhiteSpace(first))
+            {
+                return true;
+            }
+
+            return string.Equals(
+                Path.GetFullPath(first),
+                Path.GetFullPath(InstallManager.CodexPortableExe),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static string FindNativeCodexExe()
+        {
+            if (IsPortableCodexPreferred() && File.Exists(InstallManager.CodexPortableExe))
+            {
+                return InstallManager.CodexPortableExe;
+            }
+
+            string npmRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "npm",
+                "node_modules",
+                "@openai",
+                "codex");
+            string[] candidates =
+            {
+                Path.Combine(npmRoot, @"node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe"),
+                Path.Combine(npmRoot, @"node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\codex\codex.exe"),
+                Path.Combine(npmRoot, @"vendor\x86_64-pc-windows-msvc\bin\codex.exe"),
+                Path.Combine(npmRoot, @"vendor\x86_64-pc-windows-msvc\codex\codex.exe"),
+                Path.Combine(npmRoot, @"node_modules\@openai\codex-win32-arm64\vendor\aarch64-pc-windows-msvc\bin\codex.exe"),
+                Path.Combine(npmRoot, @"node_modules\@openai\codex-win32-arm64\vendor\aarch64-pc-windows-msvc\codex\codex.exe"),
+                InstallManager.CodexPortableExe
             };
+            foreach (string candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return FindFirstOnPath(new[] { "codex.exe" });
+        }
+
+        private static string FindClaudeExe()
+        {
+            string fromPath = FindFirstOnPath(new[] { "claude.exe" });
+            if (!string.IsNullOrWhiteSpace(fromPath))
+            {
+                return fromPath;
+            }
+
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string[] candidates =
+            {
+                Path.Combine(localAppData, "Microsoft", "WinGet", "Links", "claude.exe"),
+                Path.Combine(localAppData, "Programs", "Claude", "claude.exe"),
+                Path.Combine(AppPaths.Home, ".local", "bin", "claude.exe"),
+                Path.Combine(AppPaths.Home, ".claude", "local", "claude.exe")
+            };
+            foreach (string candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static string ReadNpmGlobalVersion(string scope, string packageName, string binaryName)
+        {
+            try
+            {
+                string npmBin = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "npm");
+                string cmdWrapper = Path.Combine(npmBin, binaryName + ".cmd");
+                string packageJson = Path.Combine(npmBin, "node_modules", scope, packageName, "package.json");
+                if (!File.Exists(packageJson))
+                {
+                    return null;
+                }
+                if (!File.Exists(cmdWrapper) && string.IsNullOrWhiteSpace(FindFirstOnPath(new[] { binaryName + ".cmd", binaryName + ".exe" })))
+                {
+                    return null;
+                }
+
+                Dictionary<string, object> parsed = Json.DeserializeDictionary(File.ReadAllText(packageJson));
+                object versionObj;
+                if (parsed.TryGetValue("version", out versionObj) && versionObj != null)
+                {
+                    string version = Convert.ToString(versionObj, CultureInfo.InvariantCulture).Trim();
+                    if (!string.IsNullOrWhiteSpace(version))
+                    {
+                        return version;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static DetectionItem DetectClaudeDesktop()
+        {
+            DetectionItem appx = DetectAppx(@"^Claude_", "Claude Desktop");
+            if (appx.Installed)
+            {
+                return appx;
+            }
+
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string[] desktopExes =
+            {
+                Path.Combine(localAppData, "AnthropicClaude", "claude.exe"),
+                Path.Combine(localAppData, "Programs", "claude-desktop", "Claude.exe")
+            };
+            foreach (string exe in desktopExes)
+            {
+                if (File.Exists(exe))
+                {
+                    string version = ReadFileProductVersion(exe);
+                    return new DetectionItem
+                    {
+                        Installed = true,
+                        DisplayValue = string.IsNullOrWhiteSpace(version) ? "Claude Desktop" : "v" + version
+                    };
+                }
+            }
+
+            return new DetectionItem { Installed = false, DisplayValue = "Not installed" };
+        }
+
+        internal static DetectionItem DetectAppx(string pattern, string displayName)
+        {
+            Regex regex = new Regex(pattern, RegexOptions.IgnoreCase);
+
+            foreach (string rootPath in AppxRegistryRoots)
+            {
+                try
+                {
+                    using (RegistryKey key = Registry.CurrentUser.OpenSubKey(rootPath))
+                    {
+                        if (key == null)
+                        {
+                            continue;
+                        }
+
+                        foreach (string subKeyName in key.GetSubKeyNames())
+                        {
+                            if (!regex.IsMatch(subKeyName))
+                            {
+                                continue;
+                            }
+
+                            string version = ExtractAppxVersionFromFullName(subKeyName);
+                            return new DetectionItem
+                            {
+                                Installed = true,
+                                DisplayValue = string.IsNullOrWhiteSpace(version) ? displayName : "v" + version
+                            };
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                string packagesDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Packages");
+                if (Directory.Exists(packagesDir))
+                {
+                    foreach (string dir in Directory.GetDirectories(packagesDir))
+                    {
+                        string folderName = Path.GetFileName(dir);
+                        if (!string.IsNullOrEmpty(folderName) && regex.IsMatch(folderName))
+                        {
+                            return new DetectionItem
+                            {
+                                Installed = true,
+                                DisplayValue = displayName
+                            };
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return new DetectionItem { Installed = false, DisplayValue = "Not installed" };
+        }
+
+        private static string ExtractAppxVersionFromFullName(string packageFullName)
+        {
+            if (string.IsNullOrWhiteSpace(packageFullName))
+            {
+                return null;
+            }
+
+            string[] parts = packageFullName.Split('_');
+            if (parts.Length >= 2 && Regex.IsMatch(parts[1], @"^\d+(\.\d+)+$"))
+            {
+                return parts[1];
+            }
+
+            Match match = Regex.Match(packageFullName, @"_(\d+(?:\.\d+)+)_");
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        private static string ReadFileProductVersion(string exePath)
+        {
+            try
+            {
+                FileVersionInfo info = FileVersionInfo.GetVersionInfo(exePath);
+                if (!string.IsNullOrWhiteSpace(info.ProductVersion))
+                {
+                    Match match = Regex.Match(info.ProductVersion.Trim(), @"^\d+(\.\d+)+");
+                    return match.Success ? match.Value : info.ProductVersion.Trim();
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        internal static string FindFirstOnPath(string[] fileNames)
+        {
+            if (fileNames == null || fileNames.Length == 0)
+            {
+                return null;
+            }
+
+            List<string> searchDirs = new List<string>();
+            string[] pathVars =
+            {
+                Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Process),
+                Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User),
+                Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine)
+            };
+            foreach (string rawPath in pathVars)
+            {
+                if (string.IsNullOrWhiteSpace(rawPath))
+                {
+                    continue;
+                }
+                foreach (string part in rawPath.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string clean = part.Trim().Trim('"');
+                    if (!string.IsNullOrWhiteSpace(clean) && !searchDirs.Contains(clean, StringComparer.OrdinalIgnoreCase))
+                    {
+                        searchDirs.Add(clean);
+                    }
+                }
+            }
+
+            string npmDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm");
+            if (!searchDirs.Contains(npmDir, StringComparer.OrdinalIgnoreCase))
+            {
+                searchDirs.Add(npmDir);
+            }
+            if (!searchDirs.Contains(InstallManager.CodexPortableDirectory, StringComparer.OrdinalIgnoreCase))
+            {
+                searchDirs.Add(InstallManager.CodexPortableDirectory);
+            }
+
+            foreach (string dir in searchDirs)
+            {
+                try
+                {
+                    foreach (string name in fileNames)
+                    {
+                        string candidate = Path.Combine(dir, name);
+                        if (File.Exists(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
         }
 
         private static string FirstLine(string value)
@@ -2316,7 +2678,9 @@ namespace ZendiKeySetup
         /// </summary>
         private static async Task EnsureCodexCliAsync(DetectionItem current, Action<string> report, InstallResult summary)
         {
-            bool npm = await HasCommandAsync("npm --version");
+            string nodeExe;
+            string npmCliJs;
+            bool npm = TryFindNodeAndNpmCli(out nodeExe, out npmCliJs);
 
             if (!current.Installed)
             {
@@ -2325,12 +2689,13 @@ namespace ZendiKeySetup
                     AddMessage(summary, report, "Installing Codex CLI with npm...");
                     CommandResult npmInstall = await Task.Run(delegate
                     {
-                        return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
+                        return CommandRunner.Run(nodeExe, "\"" + npmCliJs + "\" install -g @openai/codex@latest", 1200000);
                     });
                     RefreshProcessPath();
-                    if (npmInstall.ExitCode == 0 && await HasCommandAsync("codex --version"))
+                    DetectionItem after = await Task.Run(delegate { return SystemDetector.DetectCodexCli(); });
+                    if (npmInstall.ExitCode == 0 && after.Installed)
                     {
-                        AddMessage(summary, report, "Codex CLI installed (" + await CodexVersionAsync() + ").");
+                        AddMessage(summary, report, "Codex CLI installed (" + after.DisplayValue + ").");
                         return;
                     }
                     AddMessage(summary, report, "npm install did not work (" + LastUsefulLine(npmInstall.Output) + "); using the standalone build instead.");
@@ -2340,7 +2705,7 @@ namespace ZendiKeySetup
                 return;
             }
 
-            if (await IsPortableCodexAsync())
+            if (SystemDetector.IsPortableCodexPreferred())
             {
                 await UpdateCodexPortableAsync(report, summary);
                 return;
@@ -2353,7 +2718,7 @@ namespace ZendiKeySetup
                 AddMessage(summary, report, "Updating Codex CLI to the latest version...");
                 CommandResult codexUpdate = await Task.Run(delegate
                 {
-                    return CommandRunner.Run("cmd.exe", "/d /s /c \"npm install -g @openai/codex@latest\"", 1200000);
+                    return CommandRunner.Run(nodeExe, "\"" + npmCliJs + "\" install -g @openai/codex@latest", 1200000);
                 });
                 AddMessage(
                     summary,
@@ -2365,6 +2730,36 @@ namespace ZendiKeySetup
             }
 
             AddMessage(summary, report, "Codex CLI is already installed (" + current.DisplayValue + ").");
+        }
+
+        private static bool TryFindNodeAndNpmCli(out string nodeExe, out string npmCliJs)
+        {
+            nodeExe = SystemDetector.FindFirstOnPath(new[] { "node.exe" });
+            if (string.IsNullOrWhiteSpace(nodeExe))
+            {
+                string programFilesNode = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                    "nodejs",
+                    "node.exe");
+                if (File.Exists(programFilesNode))
+                {
+                    nodeExe = programFilesNode;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(nodeExe) && File.Exists(nodeExe))
+            {
+                string nodeDir = Path.GetDirectoryName(nodeExe);
+                string candidate = Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js");
+                if (File.Exists(candidate))
+                {
+                    npmCliJs = candidate;
+                    return true;
+                }
+            }
+
+            npmCliJs = null;
+            return false;
         }
 
         /// <summary>
@@ -2480,20 +2875,6 @@ namespace ZendiKeySetup
             await InstallCodexPortableAsync(report, summary);
         }
 
-        private static async Task<bool> IsPortableCodexAsync()
-        {
-            if (!File.Exists(CodexPortableExe))
-            {
-                return false;
-            }
-            CommandResult where = await Task.Run(delegate
-            {
-                return CommandRunner.Run("cmd.exe", "/d /s /c \"where codex\"", 15000);
-            });
-            string first = (where.Output ?? string.Empty).Replace("\r", string.Empty).Split('\n')[0].Trim();
-            return string.Equals(first, CodexPortableExe, StringComparison.OrdinalIgnoreCase);
-        }
-
         private static async Task<string> LatestCodexVersionAsync()
         {
             try
@@ -2519,14 +2900,10 @@ namespace ZendiKeySetup
 
         private static async Task<string> CodexVersionAsync()
         {
-            CommandResult result = await Task.Run(delegate
-            {
-                return File.Exists(CodexPortableExe)
-                    ? CommandRunner.Run(CodexPortableExe, "--version", 15000)
-                    : CommandRunner.Run("cmd.exe", "/d /s /c \"codex --version\"", 15000);
-            });
-            string line = FirstLine(result.Output);
-            return string.IsNullOrWhiteSpace(line) ? "unknown version" : line;
+            DetectionItem detected = await Task.Run(delegate { return SystemDetector.DetectCodexCli(); });
+            return detected.Installed && !string.IsNullOrWhiteSpace(detected.DisplayValue)
+                ? detected.DisplayValue
+                : "unknown version";
         }
 
         private static string FirstLine(string value)
@@ -2588,17 +2965,16 @@ namespace ZendiKeySetup
 
         private static string FindWinget()
         {
-            CommandResult probe = CommandRunner.Run("cmd.exe", "/d /s /c \"winget --version\"", 20000);
-            if (probe.ExitCode == 0)
-            {
-                return "winget.exe";
-            }
             string alias = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Microsoft",
                 "WindowsApps",
                 "winget.exe");
-            return File.Exists(alias) ? alias : null;
+            if (File.Exists(alias))
+            {
+                return alias;
+            }
+            return SystemDetector.FindFirstOnPath(new[] { "winget.exe" });
         }
 
         private static bool OpenStorePage(string productId)
@@ -2683,15 +3059,6 @@ namespace ZendiKeySetup
             string arch = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432") ??
                           Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") ?? string.Empty;
             return arch.IndexOf("ARM64", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static async Task<bool> HasCommandAsync(string commandLine)
-        {
-            CommandResult result = await Task.Run(delegate
-            {
-                return CommandRunner.Run("cmd.exe", "/d /s /c \"" + commandLine + "\"", 15000);
-            });
-            return result.ExitCode == 0;
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -2813,17 +3180,6 @@ namespace ZendiKeySetup
 
     internal static class CommandRunner
     {
-        internal static CommandResult RunPowerShell(string script, int timeoutMilliseconds)
-        {
-            // Plain -Command instead of -EncodedCommand: base64-encoded PowerShell is a
-            // common malware pattern and trips antivirus heuristics (Avast CyberCapture).
-            string command = script.Replace("\"", "\\\"");
-            return Run(
-                "powershell.exe",
-                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"" + command + "\"",
-                timeoutMilliseconds);
-        }
-
         internal static CommandResult Run(string fileName, string arguments, int timeoutMilliseconds)
         {
             ProcessStartInfo start = new ProcessStartInfo
