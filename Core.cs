@@ -1491,7 +1491,7 @@ namespace ZendiKeySetup
 
             Dictionary<string, object> config = new Dictionary<string, object>();
             config["inferenceProvider"] = "gateway";
-            config["inferenceGatewayBaseUrl"] = AppPaths.BaseUrl;
+            config["inferenceGatewayBaseUrl"] = AppPaths.ClaudeCodeBaseUrl;
             config["inferenceCredentialKind"] = "helper-script";
             config["inferenceCredentialHelper"] = helperExe;
             config["inferenceGatewayAuthScheme"] = "bearer";
@@ -1590,8 +1590,9 @@ namespace ZendiKeySetup
             string credentialKind,
             string credentialHelper)
         {
+            string normalized = NormalizeUrl(baseUrl);
             return string.Equals(provider, "gateway", StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(NormalizeUrl(baseUrl), AppPaths.BaseUrl, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(normalized, AppPaths.ClaudeCodeBaseUrl, StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(credentialKind, "helper-script", StringComparison.OrdinalIgnoreCase) &&
                    !string.IsNullOrWhiteSpace(credentialHelper) &&
                    credentialHelper.IndexOf("ZendiKeySetup.exe", StringComparison.OrdinalIgnoreCase) >= 0;
