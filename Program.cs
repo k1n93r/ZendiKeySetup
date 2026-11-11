@@ -222,6 +222,17 @@ namespace ZendiKeySetup
 
             string claudeModel = configureClaude ? ModelSelector.PickClaude(check.Models) : null;
             string codexModel = configureCodex ? ModelSelector.PickCodex(check.Models) : null;
+            if (configureClaude && configureCodex)
+            {
+                if (string.IsNullOrWhiteSpace(claudeModel) && !string.IsNullOrWhiteSpace(codexModel))
+                {
+                    configureClaude = false;
+                }
+                else if (string.IsNullOrWhiteSpace(codexModel) && !string.IsNullOrWhiteSpace(claudeModel))
+                {
+                    configureCodex = false;
+                }
+            }
 
             check = await GatewayClient.FindCompatibleModelsAsync(
                 key,
@@ -230,6 +241,19 @@ namespace ZendiKeySetup
                 codexModel,
                 configureClaude,
                 configureCodex);
+            if (!check.AllOk && configureClaude && configureCodex)
+            {
+                if (check.ClaudeOk && !check.CodexOk)
+                {
+                    configureCodex = false;
+                    check.CodexOk = true;
+                }
+                else if (check.CodexOk && !check.ClaudeOk)
+                {
+                    configureClaude = false;
+                    check.ClaudeOk = true;
+                }
+            }
             if (!check.AllOk)
             {
                 Stdout.WriteLine("ERROR: " + check.Summary);

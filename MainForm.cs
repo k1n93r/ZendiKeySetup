@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -22,11 +23,11 @@ namespace ZendiKeySetup
         private static readonly Color Warning = Color.FromArgb(181, 116, 20);
         private static readonly Color Neutral = Color.FromArgb(137, 143, 146);
 
-        // Claude Code / Claude Desktop setup is paused for customers (19/10/2026). Flip to true to
-        // show the Claude controls again; all the Claude code paths are kept intact.
-        private const bool ClaudeEnabled = true; // v1.2.2: Claude Code + Claude Desktop via api.zendigikey.shop
+        // Claude Code / Claude Desktop setup toggle.
+        private static readonly bool ClaudeEnabled = true; // v1.2.3: Claude Code + Claude Desktop via api.zendigikey.shop
 
         private TextBox _keyBox;
+        private Button _pasteButton;
         private CheckBox _showKey;
         private CheckBox _setupClaude;
         private CheckBox _setupCodex;
@@ -253,32 +254,38 @@ namespace ZendiKeySetup
 
             TableLayoutPanel keyArea = new TableLayoutPanel();
             keyArea.Dock = DockStyle.Fill;
-            keyArea.ColumnCount = 2;
+            keyArea.ColumnCount = 3;
             keyArea.RowCount = 2;
             keyArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            keyArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82F));
+            keyArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
+            keyArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 68F));
             keyArea.RowStyles.Add(new RowStyle(SizeType.Absolute, 23F));
             keyArea.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
             keyArea.Margin = new Padding(0);
 
             Label keyLabel = FieldLabel("API key or ZEN code (ZEN-XXX-XXX-XXX)");
             keyArea.Controls.Add(keyLabel, 0, 0);
-            keyArea.SetColumnSpan(keyLabel, 2);
+            keyArea.SetColumnSpan(keyLabel, 3);
 
             _keyBox = new TextBox();
             _keyBox.Dock = DockStyle.Fill;
             _keyBox.Font = new Font("Consolas", 10F, FontStyle.Regular, GraphicsUnit.Point);
             _keyBox.UseSystemPasswordChar = true;
-            _keyBox.Margin = new Padding(0, 2, 10, 1);
+            _keyBox.Margin = new Padding(0, 2, 8, 1);
             _keyBox.BorderStyle = BorderStyle.FixedSingle;
             keyArea.Controls.Add(_keyBox, 0, 1);
+
+            _pasteButton = MakeButton("Paste", ButtonKind.Compact);
+            _pasteButton.Dock = DockStyle.Fill;
+            _pasteButton.Margin = new Padding(0, 1, 8, 2);
+            keyArea.Controls.Add(_pasteButton, 1, 1);
 
             _showKey = new CheckBox();
             _showKey.Dock = DockStyle.Fill;
             _showKey.Text = "Show";
             _showKey.ForeColor = Ink;
             _showKey.Margin = new Padding(0, 1, 0, 0);
-            keyArea.Controls.Add(_showKey, 1, 1);
+            keyArea.Controls.Add(_showKey, 2, 1);
             layout.Controls.Add(keyArea, 0, 1);
 
             Label modelHeading = FieldLabel("Models returned by gateway");
@@ -464,11 +471,20 @@ namespace ZendiKeySetup
                     SetKeyState(KeyCodeClient.IsZenCode(_initialInput) ? "Code from link" : "Key from link", Success);
                     Log("Opened from link with " + (KeyCodeClient.IsZenCode(_initialInput) ? "code " + KeyCodeClient.NormalizeCode(_initialInput) : "a key") + ".");
                 }
+                else
+                {
+                    TryPasteFromClipboard(true);
+                }
                 await RefreshStatusAsync();
                 if (_initialInput != null)
                 {
                     await SetupSelectedAsync();
                 }
+            };
+
+            _pasteButton.Click += delegate
+            {
+                TryPasteFromClipboard(false);
             };
 
             _showKey.CheckedChanged += delegate
@@ -571,6 +587,7 @@ namespace ZendiKeySetup
 
                 PopulateModels(models.Models);
                 Log(models.ModelsMessage + ".");
+                AdjustTargetsForKeyModels(models.Models, ref setupClaude, ref setupCodex);
 
                 string claude = setupClaude
                     ? SelectedModel(_claudeModel, ModelSelector.PickClaude(models.Models))
@@ -590,6 +607,7 @@ namespace ZendiKeySetup
                     codex,
                     setupClaude,
                     setupCodex);
+                AdjustTargetsAfterProbe(models, ref setupClaude, ref setupCodex);
                 if (setupClaude)
                 {
                     SelectComboValue(_claudeModel, models.ClaudeModel);
@@ -672,6 +690,7 @@ namespace ZendiKeySetup
                     throw new InvalidOperationException(first.ModelsMessage);
                 }
                 PopulateModels(first.Models);
+                AdjustTargetsForKeyModels(first.Models, ref setupClaude, ref setupCodex);
 
                 string claude = setupClaude
                     ? SelectedModel(_claudeModel, ModelSelector.PickClaude(first.Models))
@@ -700,6 +719,7 @@ namespace ZendiKeySetup
                     codex,
                     setupClaude,
                     setupCodex);
+                AdjustTargetsAfterProbe(check, ref setupClaude, ref setupCodex);
                 if (!check.AllOk)
                 {
                     throw new InvalidOperationException(check.Summary);
@@ -747,19 +767,19 @@ namespace ZendiKeySetup
                 await RefreshStatusCoreAsync();
                 await ShowKeyStatusAsync(key);
                 SetOverall("Setup complete", installSuccess ? Success : Warning);
-                string successMessage = setupClaude && setupCodex
-                    ? "Setup completed. Restart Claude Desktop and ChatGPT before using the new configuration."
-                    : setupClaude
-                        ? "Claude setup completed. Restart Claude Desktop before using the new configuration."
-                        : "Codex setup completed (" + codex + "). Open the ChatGPT app or run `codex` in a new terminal.";
-                MessageBox.Show(
-                    this,
-                    installSuccess
-                        ? successMessage
-                        : "Configuration completed. One app still needs a click to finish installing - see Activity for details.",
-                    "ZendiKey Setup",
-                    MessageBoxButtons.OK,
-                    installSuccess ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                if (installSuccess)
+                {
+                    PromptCloseRunningDesktopApps(setupClaude, setupCodex, codex);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        this,
+                        "Configuration completed. One app still needs a click to finish installing - see Activity for details.",
+                        "ZendiKey Setup",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
             }
             catch (Exception ex)
             {
@@ -770,6 +790,214 @@ namespace ZendiKeySetup
             finally
             {
                 SetBusy(false, null);
+            }
+        }
+
+        private void TryPasteFromClipboard(bool silent)
+        {
+            try
+            {
+                if (!Clipboard.ContainsText())
+                {
+                    return;
+                }
+
+                string raw = (Clipboard.GetText() ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    return;
+                }
+
+                string extracted = KeyCodeClient.FromProtocolLink(raw);
+                if (string.IsNullOrWhiteSpace(extracted))
+                {
+                    extracted = raw;
+                }
+
+                bool isZen = KeyCodeClient.IsZenCode(extracted);
+                bool isSk = extracted.StartsWith("sk-", StringComparison.OrdinalIgnoreCase) && !extracted.Contains(" ");
+                if (silent)
+                {
+                    if (isZen)
+                    {
+                        _keyBox.Text = KeyCodeClient.NormalizeCode(extracted);
+                        _keyBox.SelectionStart = _keyBox.TextLength;
+                        SetKeyState("Code from clipboard", Success);
+                        Log("Detected ZEN code in clipboard: " + _keyBox.Text + ".");
+                    }
+                    else if (isSk && string.IsNullOrWhiteSpace(_keyBox.Text))
+                    {
+                        _keyBox.Text = extracted;
+                        _keyBox.SelectionStart = _keyBox.TextLength;
+                        SetKeyState("Key from clipboard", Success);
+                        Log("Detected API key in clipboard.");
+                    }
+                    return;
+                }
+
+                _keyBox.Text = isZen ? KeyCodeClient.NormalizeCode(extracted) : extracted;
+                _keyBox.SelectionStart = _keyBox.TextLength;
+                _keyBox.Focus();
+                SetKeyState(isZen ? "ZEN code pasted" : "Key pasted", Success);
+            }
+            catch
+            {
+            }
+        }
+
+        private void AdjustTargetsForKeyModels(List<string> availableModels, ref bool setupClaude, ref bool setupCodex)
+        {
+            if (availableModels == null || availableModels.Count == 0)
+            {
+                return;
+            }
+
+            bool hasClaude = ModelSelector.ClaudeModels(availableModels).Count > 0;
+            bool hasNonClaude = availableModels.Any(delegate(string m)
+            {
+                return m.IndexOf("claude", StringComparison.OrdinalIgnoreCase) < 0;
+            });
+
+            if (setupClaude && !hasClaude)
+            {
+                _setupClaude.Checked = false;
+                setupClaude = false;
+                if (!setupCodex)
+                {
+                    _setupCodex.Checked = true;
+                    setupCodex = true;
+                }
+                Log("Key is for GPT/Gemini (no Claude models) — automatically configuring Codex / ChatGPT.");
+            }
+            else if (setupCodex && !hasNonClaude && hasClaude && setupClaude)
+            {
+                // Key only exposes Claude models; keep Claude selected and uncheck Codex by default
+                // so a Claude-only key does not fail if its Responses endpoint is disabled.
+                _setupCodex.Checked = false;
+                setupCodex = false;
+                Log("Key exposes Claude models only — automatically configuring Claude.");
+            }
+        }
+
+        private void AdjustTargetsAfterProbe(GatewayCheckResult check, ref bool setupClaude, ref bool setupCodex)
+        {
+            if (check == null || check.AllOk)
+            {
+                return;
+            }
+
+            if (setupClaude && setupCodex)
+            {
+                if (check.ClaudeOk && !check.CodexOk)
+                {
+                    _setupCodex.Checked = false;
+                    setupCodex = false;
+                    check.CodexOk = true;
+                    Log("Key verified for Claude (Codex endpoint not active on this key) — configuring Claude only.");
+                }
+                else if (check.CodexOk && !check.ClaudeOk)
+                {
+                    _setupClaude.Checked = false;
+                    setupClaude = false;
+                    check.ClaudeOk = true;
+                    Log("Key verified for Codex / ChatGPT (Claude endpoint not active on this key) — configuring Codex only.");
+                }
+            }
+        }
+
+        private void PromptCloseRunningDesktopApps(bool setupClaude, bool setupCodex, string codexModel)
+        {
+            List<string> runningNames = new List<string>();
+            List<Process> runningProcs = new List<Process>();
+
+            if (setupClaude)
+            {
+                foreach (Process p in SafeGetProcesses("claude"))
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero)
+                    {
+                        runningProcs.Add(p);
+                        if (!runningNames.Contains("Claude Desktop"))
+                        {
+                            runningNames.Add("Claude Desktop");
+                        }
+                    }
+                }
+            }
+
+            if (setupCodex)
+            {
+                foreach (string procName in new[] { "ChatGPT", "Codex" })
+                {
+                    foreach (Process p in SafeGetProcesses(procName))
+                    {
+                        if (p.MainWindowHandle != IntPtr.Zero)
+                        {
+                            runningProcs.Add(p);
+                            if (!runningNames.Contains("ChatGPT"))
+                            {
+                                runningNames.Add("ChatGPT");
+                            }
+                        }
+                    }
+                }
+            }
+
+            string baseSummary = setupClaude && setupCodex
+                ? "Setup completed for Claude and Codex / ChatGPT."
+                : setupClaude
+                    ? "Claude setup completed."
+                    : "Codex / ChatGPT setup completed (" + codexModel + ").";
+
+            if (runningNames.Count > 0)
+            {
+                string joined = string.Join(" and ", runningNames.ToArray());
+                DialogResult closeNow = MessageBox.Show(
+                    this,
+                    baseSummary + "\n\n" + joined + " is currently open. Close its window now so you can reopen it with the new ZendiKey configuration?",
+                    "ZendiKey Setup",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+                if (closeNow == DialogResult.Yes)
+                {
+                    foreach (Process proc in runningProcs)
+                    {
+                        try
+                        {
+                            proc.CloseMainWindow();
+                        }
+                        catch
+                        {
+                        }
+                    }
+                    Log("Sent close signal to " + joined + ". Reopen the app to start chatting.");
+                }
+            }
+            else
+            {
+                string hint = setupClaude && setupCodex
+                    ? "Open Claude Desktop, the ChatGPT app, or run `claude` / `codex` in a new terminal."
+                    : setupClaude
+                        ? "Open Claude Desktop (or restart it from the system tray) or run `claude` in a new terminal."
+                        : "Open the ChatGPT app or run `codex` in a new terminal.";
+                MessageBox.Show(
+                    this,
+                    baseSummary + "\n\n" + hint,
+                    "ZendiKey Setup",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+
+        private static Process[] SafeGetProcesses(string name)
+        {
+            try
+            {
+                return Process.GetProcessesByName(name);
+            }
+            catch
+            {
+                return new Process[0];
             }
         }
 
@@ -888,7 +1116,8 @@ namespace ZendiKeySetup
 
             InstallResult result = await InstallManager.InstallMissingAsync(
                 Log,
-                picked.Contains("Claude Code") || picked.Contains("Claude Desktop"),
+                picked.Contains("Claude Code"),
+                picked.Contains("Claude Desktop"),
                 picked.Contains("Codex CLI"),
                 picked.Contains("ChatGPT app"));
             await RefreshStatusCoreAsync();
@@ -1107,6 +1336,7 @@ namespace ZendiKeySetup
             _resetButton.Enabled = !busy;
             _refreshButton.Enabled = !busy;
             _keyBox.Enabled = !busy;
+            _pasteButton.Enabled = !busy;
             _showKey.Enabled = !busy;
             _setupClaude.Enabled = !busy;
             _setupCodex.Enabled = !busy;

@@ -2631,10 +2631,20 @@ namespace ZendiKeySetup
             bool installCodexCli,
             bool installChatGptApp)
         {
+            return await InstallMissingAsync(report, installClaude, installClaude, installCodexCli, installChatGptApp).ConfigureAwait(false);
+        }
+
+        internal static async Task<InstallResult> InstallMissingAsync(
+            Action<string> report,
+            bool installClaudeCode,
+            bool installClaudeDesktop,
+            bool installCodexCli,
+            bool installChatGptApp)
+        {
             InstallResult summary = new InstallResult { Success = true };
             ClientStatus before = await Task.Run(delegate { return SystemDetector.Detect(); });
 
-            if (installClaude && !before.ClaudeCode.Installed)
+            if (installClaudeCode && !before.ClaudeCode.Installed)
             {
                 await InstallWinget(
                     "Claude Code",
@@ -2642,7 +2652,7 @@ namespace ZendiKeySetup
                     report,
                     summary);
             }
-            else if (installClaude)
+            else if (installClaudeCode)
             {
                 AddMessage(summary, report, "Claude Code is already installed.");
             }
@@ -2652,7 +2662,7 @@ namespace ZendiKeySetup
                 await EnsureCodexCliAsync(before.CodexCli, report, summary);
             }
 
-            if (installClaude && !before.ClaudeDesktop.Installed)
+            if (installClaudeDesktop && !before.ClaudeDesktop.Installed)
             {
                 await InstallWinget(
                     "Claude Desktop",
@@ -2660,7 +2670,7 @@ namespace ZendiKeySetup
                     report,
                     summary);
             }
-            else if (installClaude)
+            else if (installClaudeDesktop)
             {
                 AddMessage(summary, report, "Claude Desktop is already installed.");
             }
