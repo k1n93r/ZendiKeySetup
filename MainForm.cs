@@ -51,6 +51,11 @@ namespace ZendiKeySetup
         private StatusDisplay _chatGptStatus;
         private bool _busy;
         private readonly string _initialInput;
+        private string _verifiedKey;
+        private string _verifiedClaudeModel;
+        private string _verifiedCodexModel;
+        private GatewayCheckResult _verifiedResult;
+        private DateTime _verifiedAtUtc;
 
         internal MainForm()
             : this(null)
@@ -361,7 +366,7 @@ namespace ZendiKeySetup
             _installMissing.Margin = new Padding(0, 5, 0, 0);
             layout.Controls.Add(_installMissing, 0, 5);
 
-            Label hint = FieldLabel("GPT keys and GEMINI (Antigravity) keys both work here: Codex is set up with the best model your key has.");
+            Label hint = FieldLabel("Tip: Paste a ZEN code or sk- key and click Set up now — GPT, Claude & Gemini keys are auto-detected.");
             hint.Font = new Font("Segoe UI", 8.2F, FontStyle.Regular, GraphicsUnit.Point);
             hint.TextAlign = ContentAlignment.TopLeft;
             layout.Controls.Add(hint, 0, 6);
@@ -374,12 +379,12 @@ namespace ZendiKeySetup
             primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 64F));
             primaryActions.Margin = new Padding(0);
 
-            _testButton = MakeButton("Test key", ButtonKind.Neutral);
+            _testButton = MakeButton("Check key", ButtonKind.Neutral);
             _testButton.Dock = DockStyle.Fill;
             _testButton.Margin = new Padding(0, 0, 8, 0);
             primaryActions.Controls.Add(_testButton, 0, 0);
 
-            _setupButton = MakeButton("Set up selected", ButtonKind.Primary);
+            _setupButton = MakeButton("Set up now", ButtonKind.Primary);
             _setupButton.Dock = DockStyle.Fill;
             _setupButton.Margin = new Padding(0);
             primaryActions.Controls.Add(_setupButton, 1, 0);
@@ -496,6 +501,7 @@ namespace ZendiKeySetup
             {
                 if (!_busy)
                 {
+                    ClearVerifiedCache();
                     SetKeyState("Not tested", Muted);
                 }
             };
@@ -628,6 +634,7 @@ namespace ZendiKeySetup
                     {
                         Log("Responses API: " + models.CodexMessage + ".");
                     }
+                    CacheVerified(key, setupClaude ? models.ClaudeModel : null, setupCodex ? models.CodexModel : null, models);
                     await ShowKeyStatusAsync(key);
                     if (_installMissing.Checked)
                     {
@@ -636,6 +643,7 @@ namespace ZendiKeySetup
                 }
                 else
                 {
+                    ClearVerifiedCache();
                     SetKeyState("Protocol test failed", Accent);
                     Log("Protocol test failed: " + models.Summary);
                     MessageBox.Show(this, models.Summary, "Gateway check failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -683,49 +691,65 @@ namespace ZendiKeySetup
             try
             {
                 key = await ResolveInputAsync(key);
-                Log("Reading models from gateway...");
-                GatewayCheckResult first = await GatewayClient.CheckAsync(key, null, null, false);
-                if (!first.ModelsOk)
-                {
-                    throw new InvalidOperationException(first.ModelsMessage);
-                }
-                PopulateModels(first.Models);
-                AdjustTargetsForKeyModels(first.Models, ref setupClaude, ref setupCodex);
+                string pickedClaude = setupClaude ? SelectedModel(_claudeModel, null) : null;
+                string pickedCodex = setupCodex ? SelectedModel(_codexModel, null) : null;
+                GatewayCheckResult check = TryGetCachedVerification(key, setupClaude, setupCodex, pickedClaude, pickedCodex);
 
-                string claude = setupClaude
-                    ? SelectedModel(_claudeModel, ModelSelector.PickClaude(first.Models))
-                    : null;
-                string codex = setupCodex
-                    ? SelectedModel(_codexModel, ModelSelector.PickCodex(first.Models))
-                    : null;
-                if ((setupClaude && string.IsNullOrWhiteSpace(claude)) ||
-                    (setupCodex && string.IsNullOrWhiteSpace(codex)))
+                string claude;
+                string codex;
+                if (check != null)
                 {
-                    throw new InvalidOperationException("The key does not expose a compatible model for the selected setup target.");
+                    Log("Using verified key and models from recent check.");
+                    claude = setupClaude ? check.ClaudeModel : null;
+                    codex = setupCodex ? check.CodexModel : null;
                 }
+                else
+                {
+                    Log("Reading models from gateway...");
+                    GatewayCheckResult first = await GatewayClient.CheckAsync(key, null, null, false);
+                    if (!first.ModelsOk)
+                    {
+                        throw new InvalidOperationException(first.ModelsMessage);
+                    }
+                    PopulateModels(first.Models);
+                    AdjustTargetsForKeyModels(first.Models, ref setupClaude, ref setupCodex);
 
-                if (setupClaude)
-                {
-                    Log("Validating Claude model " + claude + "...");
+                    claude = setupClaude
+                        ? SelectedModel(_claudeModel, ModelSelector.PickClaude(first.Models))
+                        : null;
+                    codex = setupCodex
+                        ? SelectedModel(_codexModel, ModelSelector.PickCodex(first.Models))
+                        : null;
+                    if ((setupClaude && string.IsNullOrWhiteSpace(claude)) ||
+                        (setupCodex && string.IsNullOrWhiteSpace(codex)))
+                    {
+                        throw new InvalidOperationException("The key does not expose a compatible model for the selected setup target.");
+                    }
+
+                    if (setupClaude)
+                    {
+                        Log("Validating Claude model " + claude + "...");
+                    }
+                    if (setupCodex)
+                    {
+                        Log("Validating Codex model " + codex + "...");
+                    }
+                    check = await GatewayClient.FindCompatibleModelsAsync(
+                        key,
+                        first.Models,
+                        claude,
+                        codex,
+                        setupClaude,
+                        setupCodex);
+                    AdjustTargetsAfterProbe(check, ref setupClaude, ref setupCodex);
+                    if (!check.AllOk)
+                    {
+                        throw new InvalidOperationException(check.Summary);
+                    }
+                    claude = check.ClaudeModel;
+                    codex = check.CodexModel;
+                    CacheVerified(key, setupClaude ? claude : null, setupCodex ? codex : null, check);
                 }
-                if (setupCodex)
-                {
-                    Log("Validating Codex model " + codex + "...");
-                }
-                GatewayCheckResult check = await GatewayClient.FindCompatibleModelsAsync(
-                    key,
-                    first.Models,
-                    claude,
-                    codex,
-                    setupClaude,
-                    setupCodex);
-                AdjustTargetsAfterProbe(check, ref setupClaude, ref setupCodex);
-                if (!check.AllOk)
-                {
-                    throw new InvalidOperationException(check.Summary);
-                }
-                claude = check.ClaudeModel;
-                codex = check.CodexModel;
                 if (setupClaude)
                 {
                     SelectComboValue(_claudeModel, claude);
@@ -905,6 +929,56 @@ namespace ZendiKeySetup
             }
         }
 
+        private void ClearVerifiedCache()
+        {
+            _verifiedKey = null;
+            _verifiedClaudeModel = null;
+            _verifiedCodexModel = null;
+            _verifiedResult = null;
+            _verifiedAtUtc = DateTime.MinValue;
+        }
+
+        private void CacheVerified(string key, string claudeModel, string codexModel, GatewayCheckResult result)
+        {
+            _verifiedKey = (key ?? string.Empty).Trim();
+            _verifiedClaudeModel = claudeModel;
+            _verifiedCodexModel = codexModel;
+            _verifiedResult = result;
+            _verifiedAtUtc = DateTime.UtcNow;
+        }
+
+        private GatewayCheckResult TryGetCachedVerification(
+            string key,
+            bool setupClaude,
+            bool setupCodex,
+            string selectedClaude,
+            string selectedCodex)
+        {
+            if (_verifiedResult == null || string.IsNullOrWhiteSpace(_verifiedKey))
+            {
+                return null;
+            }
+            if ((DateTime.UtcNow - _verifiedAtUtc).TotalMinutes > 2.0)
+            {
+                return null;
+            }
+            if (!string.Equals(_verifiedKey, (key ?? string.Empty).Trim(), StringComparison.Ordinal))
+            {
+                return null;
+            }
+            if (setupClaude && (string.IsNullOrWhiteSpace(_verifiedResult.ClaudeModel) ||
+                (!string.IsNullOrWhiteSpace(selectedClaude) && !string.Equals(selectedClaude, _verifiedClaudeModel, StringComparison.OrdinalIgnoreCase))))
+            {
+                return null;
+            }
+            if (setupCodex && (string.IsNullOrWhiteSpace(_verifiedResult.CodexModel) ||
+                (!string.IsNullOrWhiteSpace(selectedCodex) && !string.Equals(selectedCodex, _verifiedCodexModel, StringComparison.OrdinalIgnoreCase))))
+            {
+                return null;
+            }
+            return _verifiedResult;
+        }
+
         private void PromptCloseRunningDesktopApps(bool setupClaude, bool setupCodex, string codexModel)
         {
             List<string> runningNames = new List<string>();
@@ -914,13 +988,10 @@ namespace ZendiKeySetup
             {
                 foreach (Process p in SafeGetProcesses("claude"))
                 {
-                    if (p.MainWindowHandle != IntPtr.Zero)
+                    runningProcs.Add(p);
+                    if (!runningNames.Contains("Claude Desktop"))
                     {
-                        runningProcs.Add(p);
-                        if (!runningNames.Contains("Claude Desktop"))
-                        {
-                            runningNames.Add("Claude Desktop");
-                        }
+                        runningNames.Add("Claude Desktop");
                     }
                 }
             }
@@ -931,13 +1002,10 @@ namespace ZendiKeySetup
                 {
                     foreach (Process p in SafeGetProcesses(procName))
                     {
-                        if (p.MainWindowHandle != IntPtr.Zero)
+                        runningProcs.Add(p);
+                        if (!runningNames.Contains("ChatGPT"))
                         {
-                            runningProcs.Add(p);
-                            if (!runningNames.Contains("ChatGPT"))
-                            {
-                                runningNames.Add("ChatGPT");
-                            }
+                            runningNames.Add("ChatGPT");
                         }
                     }
                 }
@@ -954,7 +1022,7 @@ namespace ZendiKeySetup
                 string joined = string.Join(" and ", runningNames.ToArray());
                 DialogResult closeNow = MessageBox.Show(
                     this,
-                    baseSummary + "\n\n" + joined + " is currently open. Close its window now so you can reopen it with the new ZendiKey configuration?",
+                    baseSummary + "\n\n" + joined + " is currently running (including system tray). Close it cleanly now so reopening loads the new ZendiKey configuration?",
                     "ZendiKey Setup",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Information);
@@ -964,13 +1032,30 @@ namespace ZendiKeySetup
                     {
                         try
                         {
-                            proc.CloseMainWindow();
+                            if (proc.MainWindowHandle != IntPtr.Zero)
+                            {
+                                proc.CloseMainWindow();
+                            }
                         }
                         catch
                         {
                         }
                     }
-                    Log("Sent close signal to " + joined + ". Reopen the app to start chatting.");
+                    System.Threading.Thread.Sleep(700);
+                    foreach (Process proc in runningProcs)
+                    {
+                        try
+                        {
+                            if (!proc.HasExited)
+                            {
+                                proc.Kill();
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                    Log("Closed " + joined + ". Reopen the app to start using ZendiKey.");
                 }
             }
             else
@@ -1187,6 +1272,7 @@ namespace ZendiKeySetup
             {
                 string backup = await Task.Run(delegate { return ConfigManager.ResetToDefault(); });
                 Log("ZendiKey configuration removed. Backup: " + backup);
+                ClearVerifiedCache();
                 _keyBox.Text = string.Empty;
                 SetKeyState("Not tested", Muted);
                 await RefreshStatusCoreAsync();

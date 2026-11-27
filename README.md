@@ -1,22 +1,21 @@
 # ZendiKey Setup
 
-Cài đặt ZendiKey cho Codex CLI và app ChatGPT (Codex mode) trên Windows. Dùng được cả key **GPT** lẫn key **GEMINI (Antigravity)**.
+Cài đặt tự động 1-click ZendiKey cho **Claude Code**, **Claude Desktop**, **Codex CLI** và **app ChatGPT (Codex mode)** trên Windows. Hỗ trợ đầy đủ key **GPT**, **Claude** và **GEMINI (Antigravity)** qua `https://api.zendigikey.shop`.
 
 ![Giao diện ZendiKey Setup](assets/zendikey-setup.png)
 
-## Cách sử dụng
+## Cách sử dụng (1 bước cho khách)
 
 1. [Tải ZendiKeySetup.exe](https://github.com/k1n93r/ZendiKeySetup/releases/latest/download/ZendiKeySetup.exe).
-2. Mở file vừa tải và dán **mã ZEN-XXX-XXX-XXX** (hoặc API key `sk-...`).
-3. Bấm **Test key**: ứng dụng kiểm tra key, báo app nào chưa cài (Codex CLI, app ChatGPT, Claude Code, Claude Desktop) và cho bạn chọn cài cái nào.
-4. Tick **Codex** / **Claude** tùy key, bấm **Set up selected** và chờ thông báo hoàn tất.
-5. Mở app ChatGPT (Codex mode), gõ `codex` hoặc `claude` trong terminal mới, hoặc mở Claude Desktop để dùng.
+2. Mở file vừa tải và dán **mã ZEN-XXX-XXX-XXX** (hoặc API key `sk-...`; app cũng tự nhận sẵn từ clipboard).
+3. Bấm thẳng **Set up now** (hoặc **Check key** trước nếu muốn đổi model mặc định).
+4. Mở lại **Claude Desktop** / **app ChatGPT**, hoặc gõ `claude` / `codex` trong terminal mới để dùng.
 
-Ứng dụng tự đổi mã lấy key, kiểm tra key, chọn model tốt nhất của key (GPT, Gemini hoặc Claude), cài thành phần còn thiếu và hiển thị gói / số dư / hạn dùng của key.
+Ứng dụng tự đổi mã lấy key, tự nhận diện loại key để tick đúng Claude / Codex, chọn model mới nhất của key, cài thành phần còn thiếu và hiển thị gói / số dư / hạn dùng của key.
 
 - **Codex CLI** được tải thẳng từ GitHub (bản standalone, không cần Node.js, không cần quyền admin) vào `%LocalAppData%\Programs\Codex`. Máy đã có npm thì cài qua npm.
-- **App ChatGPT** cài qua Microsoft Store (winget). Nếu winget lỗi, ứng dụng tự mở trang Store đúng app, bạn chỉ cần bấm Install.
-- **Claude Code** (`~/.claude/settings.json`) và **Claude Desktop** (cấu hình gateway) trỏ về `https://api.zendigikey.shop`; key được giữ trong credential helper của ứng dụng, không ghi thẳng vào file. Trong Claude Code, `/model opus`, `sonnet`, `haiku` lần lượt là claude-opus-5.5, claude-sonnet-5.5, claude-haiku-4.5 (theo key).
+- **Claude Code** tự cài qua `winget` hoặc fallback sang `npm` (`~/.claude/settings.json`), còn **Claude Desktop** cấu hình gateway qua `https://api.zendigikey.shop`. Trong Claude Code, `/model opus`, `sonnet`, `haiku` tự map sang bản cao nhất mà key hỗ trợ (ví dụ `claude-opus-5.5`, `claude-sonnet-5.5`, `claude-haiku-5.5`).
+- **App ChatGPT** cài qua Microsoft Store (`winget`). Nếu `winget` lỗi, ứng dụng tự mở đúng trang Store để khách bấm Install.
 - Nút **Reset to default** gỡ toàn bộ cấu hình ZendiKey khỏi Codex CLI / app ChatGPT (app vẫn còn, đăng nhập tài khoản riêng bình thường). **Restore latest** đưa cấu hình ZendiKey trở lại.
 
 ## Mở bằng link

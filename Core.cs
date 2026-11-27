@@ -662,6 +662,7 @@ namespace ZendiKeySetup
             "claude-sonnet-5.5",
             "claude-opus-5",
             "claude-sonnet-5",
+            "claude-haiku-5.5",
             "claude-fable-5",
             "claude-opus-4.8",
             "claude-opus-4.7",
@@ -676,6 +677,9 @@ namespace ZendiKeySetup
 
         private static readonly string[] CodexPreferences =
         {
+            "gpt-6.2-sol",
+            "gpt-6.2-astra",
+            "gpt-6.1-terra",
             "gpt-6.1-sol",
             "gpt-6-sol",
             "gpt-5.6-sol",
@@ -1172,7 +1176,7 @@ namespace ZendiKeySetup
             }
             DeleteIfExists(AppPaths.CodexModelCatalog);
 
-            if (IsClaudeConfigured())
+            if (ShouldCleanClaudeSettings())
             {
                 Dictionary<string, object> settings = Json.DeserializeDictionary(File.ReadAllText(AppPaths.ClaudeSettings));
                 Dictionary<string, object> env = Json.AsDictionary(GetValue(settings, "env"));
@@ -1226,6 +1230,31 @@ namespace ZendiKeySetup
 
             DeleteIfExists(AppPaths.CredentialFile);
             return backup;
+        }
+
+        private static bool ShouldCleanClaudeSettings()
+        {
+            if (IsClaudeConfigured())
+            {
+                return true;
+            }
+            try
+            {
+                if (!File.Exists(AppPaths.ClaudeSettings))
+                {
+                    return false;
+                }
+                Dictionary<string, object> settings = Json.DeserializeDictionary(File.ReadAllText(AppPaths.ClaudeSettings));
+                Dictionary<string, object> env = Json.AsDictionary(GetValue(settings, "env"));
+                string baseUrl = env == null ? null : Convert.ToString(GetValue(env, "ANTHROPIC_BASE_URL"));
+                string helper = Convert.ToString(GetValue(settings, "apiKeyHelper"));
+                return (!string.IsNullOrWhiteSpace(baseUrl) && baseUrl.IndexOf("zendigikey.shop", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                       (!string.IsNullOrWhiteSpace(helper) && helper.IndexOf("ZendiKeySetup", StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void DeleteIfExists(string path)
@@ -2646,11 +2675,7 @@ namespace ZendiKeySetup
 
             if (installClaudeCode && !before.ClaudeCode.Installed)
             {
-                await InstallWinget(
-                    "Claude Code",
-                    "--id Anthropic.ClaudeCode -e --silent --accept-source-agreements --accept-package-agreements",
-                    report,
-                    summary);
+                await EnsureClaudeCodeAsync(report, summary);
             }
             else if (installClaudeCode)
             {
@@ -2681,6 +2706,52 @@ namespace ZendiKeySetup
             }
 
             return summary;
+        }
+
+        private static async Task EnsureClaudeCodeAsync(Action<string> report, InstallResult summary)
+        {
+            string winget = FindWinget();
+            if (!string.IsNullOrWhiteSpace(winget))
+            {
+                AddMessage(summary, report, "Installing Claude Code...");
+                CommandResult wingetRes = await Task.Run(delegate
+                {
+                    return CommandRunner.Run(
+                        winget,
+                        "install --id Anthropic.ClaudeCode -e --silent --accept-source-agreements --accept-package-agreements --disable-interactivity",
+                        1200000);
+                });
+                RefreshProcessPath();
+                DetectionItem afterWinget = await Task.Run(delegate { return SystemDetector.DetectClaudeCode(); });
+                if ((wingetRes.ExitCode == 0 || wingetRes.ExitCode == WingetAlreadyInstalled) && afterWinget.Installed)
+                {
+                    AddMessage(summary, report, "Claude Code installed (" + afterWinget.DisplayValue + ").");
+                    return;
+                }
+                AddMessage(summary, report, "winget could not install Claude Code (" + LastUsefulLine(wingetRes.Output) + "); trying fallback...");
+            }
+
+            string nodeExe;
+            string npmCliJs;
+            if (TryFindNodeAndNpmCli(out nodeExe, out npmCliJs))
+            {
+                AddMessage(summary, report, "Installing Claude Code with npm...");
+                CommandResult npmRes = await Task.Run(delegate
+                {
+                    return CommandRunner.Run(nodeExe, "\"" + npmCliJs + "\" install -g @anthropic-ai/claude-code@latest", 1200000);
+                });
+                RefreshProcessPath();
+                DetectionItem afterNpm = await Task.Run(delegate { return SystemDetector.DetectClaudeCode(); });
+                if (npmRes.ExitCode == 0 && afterNpm.Installed)
+                {
+                    AddMessage(summary, report, "Claude Code installed (" + afterNpm.DisplayValue + ").");
+                    return;
+                }
+                AddMessage(summary, report, "npm install failed: " + LastUsefulLine(npmRes.Output));
+            }
+
+            summary.Success = false;
+            AddMessage(summary, report, "Claude Code was not installed automatically. Install winget or Node.js, or run: irm https://claude.ai/install.ps1 | iex");
         }
 
         /// <summary>
@@ -3273,6 +3344,8 @@ namespace ZendiKeySetup
             string[] models = { "other", "claude-sonnet-4.5", "gpt-5.6-sol" };
             Assert(ModelSelector.PickClaude(models) == "claude-sonnet-4.5", "Claude model selection");
             Assert(ModelSelector.PickCodex(models) == "gpt-5.6-sol", "Codex model selection");
+            Assert(ModelSelector.PickCodex(new[] { "gpt-5.6-sol", "gpt-6.1-sol", "gpt-6.2-sol" }) == "gpt-6.2-sol", "GPT-6.2-Sol preferred");
+            Assert(ModelSelector.PickClaudeFamily(new[] { "claude-haiku-4.5", "claude-haiku-5.5" }, "haiku") == "claude-haiku-5.5", "Claude Haiku 5.5 preferred over 4.5");
 
             // Gemini (Antigravity) key: only gemini models are exposed, argon must win.
             string[] gemini = { "gemini-2.5-flash-lite", "gemini-3-flash", "gemini-4-argon", "gemini-3-pro-image" };

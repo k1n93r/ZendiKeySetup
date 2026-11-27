@@ -15,7 +15,7 @@ namespace ZendiKeySetup
     {
         internal string Key { get; set; }
         internal string Product { get; set; }
-        internal int Quota { get; set; }
+        internal long Quota { get; set; }
         internal bool UnlimitedQuota { get; set; }
         internal long ExpiredTime { get; set; }
         internal int DurationDays { get; set; }
@@ -38,9 +38,9 @@ namespace ZendiKeySetup
         internal string Status { get; set; }
         internal bool Active { get; set; }
         internal string Product { get; set; }
-        internal int UsedQuota { get; set; }
-        internal int RemainQuota { get; set; }
-        internal int TotalQuota { get; set; }
+        internal long UsedQuota { get; set; }
+        internal long RemainQuota { get; set; }
+        internal long TotalQuota { get; set; }
         internal bool UnlimitedQuota { get; set; }
         internal long ExpiredTime { get; set; }
 
@@ -67,7 +67,7 @@ namespace ZendiKeySetup
             }
         }
 
-        internal static string PackageLabel(string product, int quota, bool unlimited)
+        internal static string PackageLabel(string product, long quota, bool unlimited)
         {
             string name = string.IsNullOrWhiteSpace(product) ? "key" : product.ToUpperInvariant();
             return name + " " + (unlimited ? "UNLIMITED" : QuotaLabel(quota));
@@ -166,57 +166,51 @@ namespace ZendiKeySetup
         internal static async Task<KeyCodeResult> ClaimAsync(string code)
         {
             code = NormalizeCode(code);
-            using (HttpClient client = CreateClient())
+            Dictionary<string, object> payload = new Dictionary<string, object>();
+            payload["code"] = code;
+
+            ApiEnvelope first = await PostAsync(SharedClient, AppPaths.ClaudeCodeBaseUrl + "/api/public/claim-key-code", payload).ConfigureAwait(false);
+            if (first.Success)
             {
-                Dictionary<string, object> payload = new Dictionary<string, object>();
-                payload["code"] = code;
-
-                ApiEnvelope first = await PostAsync(client, AppPaths.ClaudeCodeBaseUrl + "/api/public/claim-key-code", payload).ConfigureAwait(false);
-                if (first.Success)
-                {
-                    return ParseClaim(first.Data, false);
-                }
-
-                // Already used: the gateway allows recovering the key for 24 hours.
-                if (first.Message.IndexOf("already used", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    ApiEnvelope recovered = await PostAsync(client, AppPaths.ClaudeCodeBaseUrl + "/api/public/recover-key-code", payload).ConfigureAwait(false);
-                    if (recovered.Success)
-                    {
-                        return ParseClaim(recovered.Data, true);
-                    }
-                    throw new InvalidOperationException(recovered.Message);
-                }
-
-                throw new InvalidOperationException(first.Message);
+                return ParseClaim(first.Data, false);
             }
+
+            // Already used: the gateway allows recovering the key for 24 hours.
+            if (first.Message.IndexOf("already used", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                ApiEnvelope recovered = await PostAsync(SharedClient, AppPaths.ClaudeCodeBaseUrl + "/api/public/recover-key-code", payload).ConfigureAwait(false);
+                if (recovered.Success)
+                {
+                    return ParseClaim(recovered.Data, true);
+                }
+                throw new InvalidOperationException(recovered.Message);
+            }
+
+            throw new InvalidOperationException(first.Message);
         }
 
         internal static async Task<KeyStatus> CheckAsync(string key)
         {
-            using (HttpClient client = CreateClient())
+            Dictionary<string, object> payload = new Dictionary<string, object>();
+            payload["key"] = (key ?? string.Empty).Trim();
+            ApiEnvelope response = await PostAsync(SharedClient, AppPaths.ClaudeCodeBaseUrl + "/api/public/check-key", payload).ConfigureAwait(false);
+            if (!response.Success)
             {
-                Dictionary<string, object> payload = new Dictionary<string, object>();
-                payload["key"] = (key ?? string.Empty).Trim();
-                ApiEnvelope response = await PostAsync(client, AppPaths.ClaudeCodeBaseUrl + "/api/public/check-key", payload).ConfigureAwait(false);
-                if (!response.Success)
-                {
-                    throw new InvalidOperationException(response.Message);
-                }
-
-                Dictionary<string, object> data = response.Data ?? new Dictionary<string, object>();
-                return new KeyStatus
-                {
-                    Status = Str(data, "status"),
-                    Active = Bool(data, "active"),
-                    Product = Str(data, "product"),
-                    UsedQuota = Int(data, "used_quota"),
-                    RemainQuota = Int(data, "remain_quota"),
-                    TotalQuota = Int(data, "total_quota"),
-                    UnlimitedQuota = Bool(data, "unlimited_quota"),
-                    ExpiredTime = Long(data, "expired_time")
-                };
+                throw new InvalidOperationException(response.Message);
             }
+
+            Dictionary<string, object> data = response.Data ?? new Dictionary<string, object>();
+            return new KeyStatus
+            {
+                Status = Str(data, "status"),
+                Active = Bool(data, "active"),
+                Product = Str(data, "product"),
+                UsedQuota = Long(data, "used_quota"),
+                RemainQuota = Long(data, "remain_quota"),
+                TotalQuota = Long(data, "total_quota"),
+                UnlimitedQuota = Bool(data, "unlimited_quota"),
+                ExpiredTime = Long(data, "expired_time")
+            };
         }
 
         private static KeyCodeResult ParseClaim(Dictionary<string, object> data, bool recovered)
@@ -231,7 +225,7 @@ namespace ZendiKeySetup
             {
                 Key = key.Trim(),
                 Product = Str(data, "product"),
-                Quota = Int(data, "quota"),
+                Quota = Long(data, "quota"),
                 UnlimitedQuota = Bool(data, "unlimited_quota"),
                 ExpiredTime = Long(data, "expired_time"),
                 DurationDays = Int(data, "duration_days"),
@@ -239,12 +233,14 @@ namespace ZendiKeySetup
             };
         }
 
+        private static readonly HttpClient SharedClient = CreateClient();
+
         private static HttpClient CreateClient()
         {
             HttpClient client = new HttpClient();
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.2");
+            client.DefaultRequestHeaders.Add("User-Agent", "ZendiKeySetup/1.2.4");
             return client;
         }
 

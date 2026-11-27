@@ -13,9 +13,9 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
 [assembly: AssemblyCopyright("Copyright 2026 ZendiKey")]
-[assembly: AssemblyVersion("1.2.3.0")]
-[assembly: AssemblyFileVersion("1.2.3.0")]
-[assembly: AssemblyInformationalVersion("1.2.3")]
+[assembly: AssemblyVersion("1.2.4.0")]
+[assembly: AssemblyFileVersion("1.2.4.0")]
+[assembly: AssemblyInformationalVersion("1.2.4")]
 
 namespace ZendiKeySetup
 {
@@ -27,7 +27,14 @@ namespace ZendiKeySetup
         [STAThread]
         private static int Main(string[] args)
         {
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            try
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
+            }
+            catch
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            }
 
             try
             {
