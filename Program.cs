@@ -9,13 +9,13 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("ZendiKey Setup")]
-[assembly: AssemblyDescription("Configure Claude and Codex clients for zendigikey.shop")]
+[assembly: AssemblyDescription("Configure Claude and Codex clients for ZendiKey")]
 [assembly: AssemblyCompany("ZendiKey")]
 [assembly: AssemblyProduct("ZendiKey Setup")]
 [assembly: AssemblyCopyright("Copyright 2026 ZendiKey")]
-[assembly: AssemblyVersion("1.2.4.0")]
-[assembly: AssemblyFileVersion("1.2.4.0")]
-[assembly: AssemblyInformationalVersion("1.2.4")]
+[assembly: AssemblyVersion("1.2.5.0")]
+[assembly: AssemblyFileVersion("1.2.5.0")]
+[assembly: AssemblyInformationalVersion("1.2.5")]
 
 namespace ZendiKeySetup
 {
@@ -219,7 +219,7 @@ namespace ZendiKeySetup
                 Stdout.WriteLine("Package: " + claimed.Summary + (claimed.Recovered ? " (recovered)" : string.Empty));
             }
 
-            Stdout.WriteLine("Checking https://api.zendigikey.shop/v1 ...");
+            Stdout.WriteLine("Checking gateway ...");
             GatewayCheckResult check = await GatewayClient.CheckAsync(key, null, null, false);
             if (!check.ModelsOk)
             {

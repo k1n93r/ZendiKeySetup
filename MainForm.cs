@@ -162,10 +162,11 @@ namespace ZendiKeySetup
 
             Label endpoint = new Label();
             endpoint.AutoSize = true;
+            endpoint.UseMnemonic = false;
             endpoint.Location = new Point(105, 56);
             endpoint.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
             endpoint.ForeColor = Color.FromArgb(194, 199, 201);
-            endpoint.Text = AppPaths.BaseUrl;
+            endpoint.Text = "One-click setup for Claude & Codex";
             header.Controls.Add(endpoint);
 
             _overallState = new Label();
@@ -367,6 +368,7 @@ namespace ZendiKeySetup
             layout.Controls.Add(_installMissing, 0, 5);
 
             Label hint = FieldLabel("Tip: Paste a ZEN code or sk- key and click Set up now — GPT, Claude & Gemini keys are auto-detected.");
+            hint.UseMnemonic = false;
             hint.Font = new Font("Segoe UI", 8.2F, FontStyle.Regular, GraphicsUnit.Point);
             hint.TextAlign = ContentAlignment.TopLeft;
             layout.Controls.Add(hint, 0, 6);
@@ -468,7 +470,7 @@ namespace ZendiKeySetup
             {
                 LoadExistingCredential();
                 LoadConfiguredModels();
-                Log("Ready. Gateway: " + AppPaths.BaseUrl);
+                Log("Ready.");
                 if (_initialInput != null)
                 {
                     _keyBox.Text = _initialInput;
